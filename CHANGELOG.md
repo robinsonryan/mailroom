@@ -7,6 +7,12 @@ Behavior changes land here in the commit that makes them, not at tag time.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-30
+
+### Added
+- `mailroom:replay`: ask a type set about messages with known answers and report agreement,
+  changing nothing.
+
 ## [0.3.0] - 2026-10-30
 
 ### Added

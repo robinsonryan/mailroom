@@ -259,7 +259,7 @@ final readonly class Typist
         );
     }
 
-    private function state(MessageSummary $summary): string
+    public function state(MessageSummary $summary): string
     {
         $attachments = $summary->attachmentNames === [] ? 'none' : implode(', ', $summary->attachmentNames);
 
