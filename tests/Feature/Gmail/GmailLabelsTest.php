@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\ProviderUnavailable;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
 beforeEach(function (): void {
@@ -126,3 +127,28 @@ it('reports a message that is gone when labelling or archiving', function (Closu
     'labels' => [fn ($provider, $mailbox) => $provider->changeLabels($mailbox, 'gone', ['Invoices/Filed'], [])],
     'archive' => [fn ($provider, $mailbox) => $provider->archive($mailbox, 'gone')],
 ])->throws(MessageNotFound::class);
+
+it('keeps a 400 on a message that message\'s failure, without retrying or giving up the mailbox', function (): void {
+    GmailApi::fake(['messages/m1/modify' => Http::response(['error' => ['code' => 400, 'errors' => [['reason' => 'invalidArgument']]]], 400)]);
+
+    expect(fn () => $this->provider->archive($this->mailbox, 'm1'))->toThrow(ProviderUnavailable::class);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/m1/modify'))->toHaveCount(1);
+});
+
+it('forgets the label map when Gmail refuses a write, so a deleted label is not sent again', function (): void {
+    GmailApi::fake([
+        'labels' => fn (Request $request) => $request->method() === 'POST'
+            ? Http::response(['id' => 'Label_50', 'name' => $request['name'], 'type' => 'user'])
+            : Http::response(count(GmailApi::requests(GmailApi::BASE.'labels')) === 0 ? GmailApi::fixture('labels') : ['labels' => []]),
+        'messages/m1/modify' => Http::sequence()
+            ->push(['error' => ['code' => 400, 'errors' => [['reason' => 'invalidArgument']]]], 400)
+            ->push($this->modified),
+    ]);
+
+    expect(fn () => $this->provider->changeLabels($this->mailbox, 'm1', ['Invoices/Filed'], []))->toThrow(ProviderUnavailable::class);
+
+    $this->provider->changeLabels($this->mailbox, 'm1', ['Invoices/Filed'], []);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/m1/modify')[1]['addLabelIds'])->toBe(['Label_50']);
+});

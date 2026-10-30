@@ -284,6 +284,11 @@ final readonly class GmailProvider implements MailProvider
     private function modify(Mailbox $mailbox, string $id, array $body): void
     {
         $response = $this->client->request($mailbox, 'POST', "{$this->messagePath($id)}/modify", body: $body);
+
+        if ($response->status() === 400) {
+            $this->labels->forget($mailbox);
+        }
+
         $this->messageJson($response, $mailbox, $id);
     }
 

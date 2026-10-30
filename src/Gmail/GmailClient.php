@@ -39,6 +39,9 @@ final readonly class GmailClient
 
     private const RATE_LIMIT_REASONS = ['rateLimitExceeded', 'userRateLimitExceeded'];
 
+    /** Token errors no retry can cure: someone has to reconnect the mailbox. */
+    private const PERMANENT_TOKEN_ERRORS = ['invalid_grant', 'invalid_client', 'unauthorized_client'];
+
     /** @var Closure(int): void */
     private Closure $sleep;
 
@@ -58,7 +61,8 @@ final readonly class GmailClient
 
     /**
      * Call users/me/<path>. Returns whatever Gmail answered once it is neither
-     * transient nor an authentication failure.
+     * transient nor a refusal of the mailbox's access. Any other refusal, like a
+     * 400 about one message, is the caller's and leaves the mailbox connected.
      *
      * @param  array<string, mixed>  $query  list values become repeated parameters
      * @param  array<string, mixed>|null  $body  sent as JSON
@@ -77,14 +81,12 @@ final readonly class GmailClient
 
         $response = $this->withRetries($call, $repeatable);
 
-        if ($response->status() !== 401) {
-            return $response;
+        if ($response->status() === 401) {
+            $this->cache->forget(self::TOKEN_CACHE.$mailbox->identity);
+            $response = $this->withRetries($call, $repeatable);
         }
 
-        $this->cache->forget(self::TOKEN_CACHE.$mailbox->identity);
-        $response = $this->withRetries($call, $repeatable);
-
-        if ($response->status() === 401) {
+        if ($response->status() === 401 || $this->lacksPermission($response)) {
             throw new MailboxDisconnected("{$mailbox->address} refused its credentials.");
         }
 
@@ -157,7 +159,7 @@ final readonly class GmailClient
             'refresh_token' => $credentials->refreshToken,
         ]));
 
-        if ($response->json('error') === 'invalid_grant') {
+        if (in_array($response->json('error'), self::PERMANENT_TOKEN_ERRORS, true)) {
             throw new MailboxDisconnected("{$mailbox->address} refused its credentials.");
         }
 
@@ -225,13 +227,18 @@ final readonly class GmailClient
             return true;
         }
 
-        if ($response->status() !== 403) {
-            return false;
-        }
+        return array_intersect($this->forbiddenReasons($response), self::RATE_LIMIT_REASONS) !== [];
+    }
 
-        $reasons = array_column((array) $response->json('error.errors'), 'reason');
+    private function lacksPermission(Response $response): bool
+    {
+        return in_array('insufficientPermissions', $this->forbiddenReasons($response), true);
+    }
 
-        return array_intersect($reasons, self::RATE_LIMIT_REASONS) !== [];
+    /** @return list<string> why Gmail answered 403, if it did */
+    private function forbiddenReasons(Response $response): array
+    {
+        return $response->status() === 403 ? array_column((array) $response->json('error.errors'), 'reason') : [];
     }
 
     /** Seconds the response asks to wait: Retry-After is either a number or an HTTP date. */

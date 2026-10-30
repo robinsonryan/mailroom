@@ -80,7 +80,7 @@ it('never waits less than the backoff', function (): void {
 });
 
 it('does not retry a 403 that is not about rate', function (): void {
-    GmailApi::fake(['profile' => Http::response(GmailApi::fixture('error-insufficient-permissions'), 403)]);
+    GmailApi::fake(['profile' => Http::response(['error' => ['code' => 403, 'errors' => [['reason' => 'forbidden']]]], 403)]);
 
     expect(fn () => $this->provider->currentCursor($this->mailbox))->toThrow(ProviderUnavailable::class);
 

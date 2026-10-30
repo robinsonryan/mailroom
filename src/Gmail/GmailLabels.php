@@ -61,6 +61,12 @@ final readonly class GmailLabels
         return $this->find($mailbox, $name) ?? $this->create($mailbox, $name);
     }
 
+    /** Drop the map: Gmail refused an id it holds, most likely a label deleted since. */
+    public function forget(Mailbox $mailbox): void
+    {
+        $this->cache->forget(self::CACHE.$mailbox->id);
+    }
+
     private function create(Mailbox $mailbox, string $name): string
     {
         $response = $this->client->request($mailbox, 'POST', 'labels', body: [
