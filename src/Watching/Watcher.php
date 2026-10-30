@@ -121,7 +121,7 @@ final readonly class Watcher
         $days = (int) config('mailroom.watch.resync_days');
         $askGateway = true;
 
-        foreach ($this->providers->for($mailbox)->search($mailbox, "newer_than:{$days}d") as $id) {
+        foreach ($this->providers->for($mailbox)->search($mailbox, "newer_than:{$days}d -in:drafts -in:spam -in:trash") as $id) {
             try {
                 $askGateway = $this->typist->type($mailbox, $id, $askGateway);
             } catch (MessageNotFound) {

@@ -298,7 +298,7 @@ describe('resync', function (): void {
         $provider = Mockery::mock(MailProvider::class);
         $provider->shouldReceive('history')->andThrow(new CursorExpired('Gone.'));
         $provider->shouldReceive('currentCursor')->andReturn('77');
-        $provider->shouldReceive('search')->once()->with(Mockery::any(), 'newer_than:3d')->andReturn([]);
+        $provider->shouldReceive('search')->once()->with(Mockery::any(), 'newer_than:3d -in:drafts -in:spam -in:trash')->andReturn([]);
         app(ProviderRegistry::class)->swap('gmail', $provider);
 
         tick();
