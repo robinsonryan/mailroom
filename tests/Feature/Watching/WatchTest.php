@@ -306,6 +306,10 @@ describe('resync', function (): void {
         expect($this->mailbox->refresh()->cursor)->toBe('77');
     });
 
+    it('leaves how often it ticks to the consumer\'s schedule', function (): void {
+        expect(config('mailroom.watch'))->not->toHaveKey('interval_seconds');
+    });
+
     it('takes the new cursor before searching, so what lands during the resync still comes through the history', function (): void {
         $this->mailbox->update(['cursor' => '5']);
         $provider = Mockery::mock(MailProvider::class);

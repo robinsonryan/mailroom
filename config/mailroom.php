@@ -24,11 +24,10 @@ return [
     ],
 
     /*
-    | Watching: the scheduler runs mailroom:watch every N seconds; an expired
-    | cursor resyncs this many days.
+    | Watching: an expired cursor resyncs this many days. How often
+    | mailroom:watch runs is the consumer's schedule.
     */
     'watch' => [
-        'interval_seconds' => (int) env('MAILROOM_WATCH_INTERVAL', 10),
         'resync_days' => (int) env('MAILROOM_RESYNC_DAYS', 7),
     ],
 
