@@ -115,7 +115,13 @@ final readonly class GmailProvider implements MailProvider
 
     public function attachment(Mailbox $mailbox, string $providerMessageId, string $partId): string
     {
-        $path = "{$this->messagePath($providerMessageId)}/attachments/".rawurlencode($partId);
+        $body = (new GmailMessage($this->resource($mailbox, $providerMessageId, 'full')))->partBody($partId);
+
+        if (! isset($body['attachmentId'])) {
+            throw new MessageNotFound("No part {$partId} in message {$providerMessageId}.");
+        }
+
+        $path = "{$this->messagePath($providerMessageId)}/attachments/".rawurlencode((string) $body['attachmentId']);
         $response = $this->client->request($mailbox, 'GET', $path);
 
         return GmailMessage::decode((string) $this->messageJson($response, $mailbox, $providerMessageId)['data']);
@@ -251,9 +257,15 @@ final readonly class GmailProvider implements MailProvider
 
     private function message(Mailbox $mailbox, string $id, string $format): GmailMessage
     {
+        return new GmailMessage($this->resource($mailbox, $id, $format));
+    }
+
+    /** @return array<string, mixed> */
+    private function resource(Mailbox $mailbox, string $id, string $format): array
+    {
         $response = $this->client->request($mailbox, 'GET', $this->messagePath($id), ['format' => $format]);
 
-        return new GmailMessage($this->messageJson($response, $mailbox, $id));
+        return $this->messageJson($response, $mailbox, $id);
     }
 
     /** @param  array<string, mixed>  $body */

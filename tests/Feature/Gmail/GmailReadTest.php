@@ -96,8 +96,8 @@ it('reads the full message: headers, both bodies and its attachments', function 
         ->and($content->html)->toContain('<b>$1,284.50</b>');
 
     expect(array_map(fn (Attachment $a): array => [$a->partId, $a->filename, $a->mime, $a->size], $content->attachments))->toBe([
-        ['ANGjdJ_invoice_pdf', 'invoice-10442.pdf', 'application/pdf', 224408],
-        ['ANGjdJ_lines_csv', 'lines.csv', 'text/csv', 512],
+        ['1', 'invoice-10442.pdf', 'application/pdf', 224408],
+        ['2', 'lines.csv', 'text/csv', 512],
     ]);
 });
 
@@ -132,10 +132,54 @@ it('treats an attached message as one attachment and prefers the inline text', f
 });
 
 it('returns an attachment\'s bytes', function (): void {
-    GmailApi::fake(['messages/19a2f0c1d2e3f405/attachments/ANGjdJ_invoice_pdf' => Http::response(GmailApi::fixture('attachment'))]);
+    GmailApi::fake([
+        'messages/19a2f0c1d2e3f405/attachments/ANGjdJ_invoice_pdf' => Http::response(GmailApi::fixture('attachment')),
+        'messages/19a2f0c1d2e3f405?*' => Http::response(GmailApi::fixture('message-multipart')),
+    ]);
 
-    expect($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', 'ANGjdJ_invoice_pdf'))
+    expect($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', '1'))
         ->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
+});
+
+it('names an attachment by its part, which outlives the attachment id Gmail hands out per read', function (): void {
+    $reread = GmailApi::fixture('message-multipart');
+    $reread['payload']['parts'][1]['body']['attachmentId'] = 'ANGjdJ_reissued';
+    GmailApi::fake([
+        'messages/19a2f0c1d2e3f405/attachments/ANGjdJ_reissued' => Http::response(GmailApi::fixture('attachment')),
+        'messages/19a2f0c1d2e3f405?*' => Http::sequence()
+            ->push(GmailApi::fixture('message-multipart'))
+            ->push($reread)
+            ->push($reread),
+    ]);
+
+    $first = $this->provider->content($this->mailbox, '19a2f0c1d2e3f405')->attachments[0]->partId;
+    $second = $this->provider->content($this->mailbox, '19a2f0c1d2e3f405')->attachments[0]->partId;
+
+    expect($second)->toBe($first)
+        ->and($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', $first))->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
+});
+
+it('reports a part the message does not hold as not found', function (): void {
+    GmailApi::fake(['messages/19a2f0c1d2e3f405?*' => Http::response(GmailApi::fixture('message-multipart'))]);
+
+    expect(fn () => $this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', '9'))
+        ->toThrow(MessageNotFound::class, 'No part 9');
+});
+
+it('fetches a message that is nothing but its attachment, whose part id is empty', function (): void {
+    $message = ['id' => 'm1', 'threadId' => 't1', 'payload' => [
+        'partId' => '', 'mimeType' => 'application/pdf', 'filename' => 'scan.pdf',
+        'body' => ['attachmentId' => 'a1', 'size' => 2048],
+    ]];
+    GmailApi::fake([
+        'messages/m1/attachments/a1' => Http::response(GmailApi::fixture('attachment')),
+        'messages/m1?*' => Http::response($message),
+    ]);
+
+    $partId = $this->provider->content($this->mailbox, 'm1')->attachments[0]->partId;
+
+    expect($partId)->toBe('')
+        ->and($this->provider->attachment($this->mailbox, 'm1', $partId))->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
 });
 
 it('reports a message that is gone', function (Closure $call): void {

@@ -88,6 +88,20 @@ final readonly class GmailMessage
         return $this->attachments;
     }
 
+    /**
+     * The body of the part with this Gmail partId. Unlike the attachmentId inside
+     * it, a partId stays the same across reads. A message that is nothing but its
+     * attachment has the part id ''.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function partBody(string $partId): ?array
+    {
+        $part = $this->findPart((array) ($this->resource['payload'] ?? []), $partId);
+
+        return $part === null ? null : (array) ($part['body'] ?? []);
+    }
+
     /** The plain part, or the html reduced to text, cut to $limit characters. */
     public function summaryText(int $limit): string
     {
@@ -123,11 +137,32 @@ final readonly class GmailMessage
         return [$bodies, $named];
     }
 
+    /**
+     * @param  array<string, mixed>  $part
+     * @return array<string, mixed>|null
+     */
+    private function findPart(array $part, string $partId): ?array
+    {
+        if ((string) ($part['partId'] ?? '') === $partId) {
+            return $part;
+        }
+
+        foreach ((array) ($part['parts'] ?? []) as $child) {
+            $found = $this->findPart((array) $child, $partId);
+
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
     /** @param  array<string, mixed>  $part */
     private function attachment(array $part): Attachment
     {
         return new Attachment(
-            (string) $part['body']['attachmentId'],
+            (string) ($part['partId'] ?? ''),
             (string) $part['filename'],
             strtolower((string) ($part['mimeType'] ?? '')),
             (int) ($part['body']['size'] ?? 0),
