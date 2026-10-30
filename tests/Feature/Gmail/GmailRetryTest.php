@@ -98,14 +98,27 @@ it('retries a dropped connection and reports it as unavailable', function (): vo
     expect($this->slept)->toBe([1, 4, 16]);
 });
 
-it('never repeats a send after a 5xx, which may mean Gmail accepted it', function (): void {
-    GmailApi::fake(['messages/send' => Http::response(GmailApi::fixture('error-backend'), 503)]);
+it('never repeats a call that creates something after an answer that may mean Gmail accepted it', function (Closure $create, string $route, Closure $failure): void {
+    // Rejected requests never reach Http::recorded(), so the stub does the counting.
+    $calls = 0;
+    GmailApi::fake([$route => function () use (&$calls, $failure) {
+        $calls++;
 
-    expect(fn () => $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')))
-        ->toThrow(ProviderUnavailable::class);
+        return $failure();
+    }]);
 
-    expect(GmailApi::requests(GmailApi::BASE.'messages/send'))->toHaveCount(1);
-});
+    expect(fn () => $create($this->provider, $this->mailbox))->toThrow(ProviderUnavailable::class);
+
+    expect($calls)->toBe(1)
+        ->and($this->slept)->toBe([]);
+})->with([
+    'send' => [fn ($provider, $mailbox) => $provider->send($mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')), 'messages/send'],
+    'draft' => [fn ($provider, $mailbox) => $provider->draft($mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')), 'drafts'],
+    'insert' => [fn ($provider, $mailbox) => $provider->insert($mailbox, "From: a@vendor.example\r\n\r\nBody\r\n"), 'messages?*'],
+])->with([
+    'a 503' => [fn (): Closure => fn (): GuzzleHttp\Promise\PromiseInterface => Http::response(GmailApi::fixture('error-backend'), 503)],
+    'a dropped connection' => [fn (): Closure => fn (): GuzzleHttp\Promise\PromiseInterface => Create::rejectionFor(new ConnectionException('cURL error 28'))],
+]);
 
 it('retries a send refused by the rate limit, which Gmail did not accept', function (): void {
     GmailApi::fake(['messages/send' => Http::sequence()
