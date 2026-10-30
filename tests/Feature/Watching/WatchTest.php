@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Contracts\MailProvider;
 use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Data\HistoryChange;
 use RobinsonRyan\Mailroom\Data\HistoryPage;
 use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
+use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Enums\MailboxStatus;
 use RobinsonRyan\Mailroom\Events\GatewayStuck;
 use RobinsonRyan\Mailroom\Events\MailboxLostAccess;
@@ -103,14 +105,14 @@ describe('ticks', function (): void {
         $cursor = $this->mailbox->cursor;
         $first = $this->fake->deliver(INFO);
         $second = $this->fake->deliver(INFO);
-        $blow = true;
-        Event::listen(MessageTyped::class, function () use (&$blow): void {
-            if ($blow) {
-                $blow = false;
-
-                throw new RuntimeException('listener failed');
+        $asks = 0;
+        $this->gateway->using = function () use (&$asks): GatewayAnswer {
+            if (++$asks === 2) {
+                throw new RuntimeException('Something unforeseen.');
             }
-        });
+
+            return new GatewayAnswer('invoice', 0.95, null);
+        };
 
         $this->artisan('mailroom:watch')->assertFailed();
 
@@ -122,6 +124,38 @@ describe('ticks', function (): void {
         expect($this->mailbox->refresh()->cursor)->not->toBe($cursor)
             ->and(Typing::query()->count())->toBe(2)
             ->and(Message::query()->pluck('provider_message_id')->sort()->values()->all())->toBe([$first, $second]);
+    });
+
+    it('carries on past a listener that throws, logs the typing, and can fire it again', function (): void {
+        watching();
+        $cursor = $this->mailbox->cursor;
+        $first = $this->fake->deliver(INFO);
+        $second = $this->fake->deliver(INFO);
+        $heard = [];
+        $blow = true;
+        Event::listen(MessageTyped::class, function (MessageTyped $event) use (&$blow, &$heard): void {
+            if ($blow) {
+                $blow = false;
+
+                throw new RuntimeException('listener failed');
+            }
+
+            $heard[] = $event->ref->providerMessageId;
+        });
+        Log::spy();
+
+        $this->artisan('mailroom:watch')->assertSuccessful();
+
+        $missed = Message::query()->where('provider_message_id', $first)->sole()->currentTyping('invoices');
+        expect($this->mailbox->refresh()->cursor)->not->toBe($cursor)
+            ->and(Typing::query()->count())->toBe(2)
+            ->and($heard)->toBe([$second]);
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['typing_id'] === $missed?->id)->once();
+
+        $this->artisan('mailroom:announce', ['typing' => $missed?->id])->assertSuccessful();
+
+        expect($heard)->toBe([$second, $first]);
     });
 
     it('watches only active mailboxes', function (): void {
@@ -264,12 +298,16 @@ describe('resync', function (): void {
         $provider = Mockery::mock(MailProvider::class);
         $provider->shouldReceive('history')->andThrow(new CursorExpired('Gone.'));
         $provider->shouldReceive('currentCursor')->andReturn('77');
-        $provider->shouldReceive('search')->once()->with(Mockery::any(), 'newer_than:3d')->andReturn([]);
+        $provider->shouldReceive('search')->once()->with(Mockery::any(), 'newer_than:3d -in:drafts -in:spam -in:trash')->andReturn([]);
         app(ProviderRegistry::class)->swap('gmail', $provider);
 
         tick();
 
         expect($this->mailbox->refresh()->cursor)->toBe('77');
+    });
+
+    it('leaves how often it ticks to the consumer\'s schedule', function (): void {
+        expect(config('mailroom.watch'))->not->toHaveKey('interval_seconds');
     });
 
     it('takes the new cursor before searching, so what lands during the resync still comes through the history', function (): void {
@@ -523,6 +561,44 @@ describe('retry queue', function (): void {
     });
 });
 
+describe('an answer the set cannot use', function (): void {
+    it('stops asking after three and never calls the gateway stuck', function (): void {
+        Event::fake([GatewayStuck::class]);
+        watching();
+        $this->gateway->answers('made_up', 0.9);
+        $this->fake->deliver(INFO);
+
+        foreach (range(1, 5) as $tick) {
+            tick();
+            $this->travel(10)->minutes();
+        }
+
+        $typing = Typing::query()->sole();
+        expect($this->gateway->asks)->toHaveCount(3)
+            ->and($typing->type)->toBe('other')
+            ->and($typing->confident)->toBeFalse();
+
+        Event::assertNotDispatched(GatewayStuck::class);
+    });
+
+    it('takes it as the gateway being back, ending an outage', function (): void {
+        Event::fake([GatewayStuck::class]);
+        watching();
+        $this->gateway->down = true;
+        $this->fake->deliver(INFO);
+        tick();
+        $this->gateway->down = false;
+        $this->gateway->answers('made_up', 0.9);
+        tick();
+
+        $this->travel(31)->minutes();
+        $this->gateway->down = true;
+        tick();
+
+        Event::assertNotDispatched(GatewayStuck::class);
+    });
+});
+
 describe('label changes', function (): void {
     it('recognises its own label write as an echo, not a correction', function (): void {
         watching();
@@ -676,5 +752,37 @@ describe('label changes', function (): void {
 
         expect(Message::query()->sole()->currentTyping('invoices')?->type)->toBe('invoice')
             ->and(Message::query()->sole()->currentTyping('invoices')?->decided_by)->toBe(DecidedBy::Person);
+    });
+
+    it('does not take a person\'s label for the echo of a write over an hour old', function (): void {
+        watching();
+        $id = $this->fake->deliver(INFO);
+        tick();
+        tick();
+        // Left by a tick killed between the ledger row and the provider call.
+        LabelWrite::query()->create(['message_id' => Message::query()->sole()->id, 'label' => 'Invoices/Bill ready', 'action' => LabelAction::Add]);
+
+        $this->travel(61)->minutes();
+        $this->fake->personLabels(INFO, $id, add: ['Invoices/Bill ready']);
+        tick();
+
+        $current = Message::query()->sole()->currentTyping('invoices');
+        expect($current?->type)->toBe('bill_ready')
+            ->and($current?->decided_by)->toBe(DecidedBy::Person);
+    });
+
+    it('still reads a label as the echo of a write under an hour old', function (): void {
+        watching();
+        $id = $this->fake->deliver(INFO);
+        tick();
+        tick();
+        LabelWrite::query()->create(['message_id' => Message::query()->sole()->id, 'label' => 'Invoices/Bill ready', 'action' => LabelAction::Add]);
+
+        $this->travel(59)->minutes();
+        $this->fake->personLabels(INFO, $id, add: ['Invoices/Bill ready']);
+        tick();
+
+        expect(Message::query()->sole()->currentTyping('invoices')?->type)->toBe('invoice')
+            ->and(LabelWrite::query()->whereNull('echoed_at')->count())->toBe(0);
     });
 });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Contracts\Corrections;
+use RobinsonRyan\Mailroom\Contracts\MailProvider;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
 use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Events\MessageTyped;
@@ -13,6 +14,7 @@ use RobinsonRyan\Mailroom\Mailroom;
 use RobinsonRyan\Mailroom\Models\LabelWrite;
 use RobinsonRyan\Mailroom\Models\Message;
 use RobinsonRyan\Mailroom\Models\Typing;
+use RobinsonRyan\Mailroom\ProviderRegistry;
 use RobinsonRyan\Mailroom\Testing\FakeProvider;
 use RobinsonRyan\Mailroom\Tests\Feature\Typing\Support\FakeGateway;
 use RobinsonRyan\Mailroom\Tests\Feature\Typing\Support\InvoiceSet;
@@ -156,6 +158,58 @@ it('reports to the gateway only after consumers have heard', function (): void {
 
     expect($labelsSeen)->toBe(0)
         ->and($this->gateway->labels)->toHaveCount(1);
+});
+
+it('leaves one current typing however many times a message is corrected, and can still be deleted', function (): void {
+    typeFirst();
+
+    $this->mailroom->correct($this->ref, 'invoices', 'bill_ready');
+    $last = $this->mailroom->correct($this->ref, 'invoices', 'other');
+
+    expect(Typing::query()->count())->toBe(3)
+        ->and(Typing::query()->whereNull('superseded_by_id')->sole()->id)->toBe($last->id);
+
+    Message::query()->sole()->delete();
+
+    expect(Typing::query()->count())->toBe(0);
+});
+
+it('puts a person\'s word on top of a typing that landed while it was being recorded', function (): void {
+    $message = $this->mailroom->record($this->ref);
+    $provider = Mockery::mock(MailProvider::class);
+    $provider->shouldReceive('changeLabels')->andReturnUsing(function () use ($message): void {
+        if (Typing::query()->doesntExist()) {
+            Typing::query()->create([
+                'message_id' => $message->id, 'type_set' => 'invoices', 'type_set_version' => 3,
+                'type' => 'invoice', 'decided_by' => DecidedBy::Gateway, 'confident' => true,
+            ]);
+        }
+    });
+    app(ProviderRegistry::class)->swap('gmail', $provider);
+    Event::fake([MessageTyped::class]);
+
+    $typing = $this->mailroom->correct($this->ref, 'invoices', 'bill_ready');
+
+    expect(Typing::query()->whereNull('superseded_by_id')->sole()->id)->toBe($typing->id)
+        ->and(Typing::query()->where('type', 'invoice')->sole()->superseded_by_id)->toBe($typing->id)
+        ->and(LabelWrite::query()->where('label', 'Invoices/Invoice')->where('action', LabelAction::Remove)->count())->toBe(1);
+
+    Event::assertDispatchedTimes(MessageTyped::class, 1);
+});
+
+it('keeps a correction and still reports it when a listener throws', function (): void {
+    typeFirst();
+    Event::listen(MessageTyped::class, function (): never {
+        throw new RuntimeException('listener failed');
+    });
+    Log::spy();
+
+    $typing = $this->mailroom->correct($this->ref, 'invoices', 'bill_ready');
+
+    expect(Message::query()->sole()->currentTyping('invoices')?->id)->toBe($typing->id)
+        ->and($this->gateway->labels)->toHaveCount(1);
+
+    Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['typing_id'] === $typing->id)->once();
 });
 
 it('refuses an unknown type set', function (): void {

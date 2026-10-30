@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace RobinsonRyan\Mailroom\Typing;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Contracts\DecisionGateway;
+use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Data\MessageSummary;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
-use RobinsonRyan\Mailroom\Events\MessageTyped;
 use RobinsonRyan\Mailroom\Exceptions\GatewayUnavailable;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
 use RobinsonRyan\Mailroom\Mailroom;
@@ -28,12 +31,16 @@ use RobinsonRyan\Mailroom\TypeSets\TypeSetRegistry;
  */
 final readonly class Typist
 {
+    /** How many answers the set cannot use one message gets before a person is asked. */
+    private const UNUSABLE_ANSWERS = 3;
+
     public function __construct(
         private ProviderRegistry $providers,
         private TypeSetRegistry $typeSets,
         private DecisionGateway $gateway,
         private GatewayOutage $outage,
         private Mailroom $mailroom,
+        private TypingAnnouncer $announcer,
     ) {}
 
     /**
@@ -122,15 +129,14 @@ final readonly class Typist
             return false;
         }
 
-        // An answer the set cannot use: the gateway is reachable, so keep asking
-        // it about other messages, but this one stays untyped.
+        $this->outage->recovered();
+
         if (! $set->type($answer->type) instanceof TypeDefinition) {
-            $this->outage->failed();
+            $this->unusableAnswer($message, $summary, $set, $answer);
 
             return true;
         }
 
-        $this->outage->recovered();
         $confident = $answer->confidence !== null && $answer->confidence >= $set->threshold;
         $this->save($message, $summary, $set, $answer->type, $answer->confidence, DecidedBy::Gateway, $confident, $answer->decisionId);
 
@@ -138,8 +144,51 @@ final readonly class Typist
     }
 
     /**
+     * The gateway answered, so this is no outage, but with nothing the set can
+     * use. The message stays untyped and is asked about again; once the limit is
+     * reached a not-confident typing hands it to a person and ends the asking.
+     * The count lives in the cache like the outage does: losing it costs a few
+     * more asks. The answer itself is not logged, as it can echo the mail.
+     */
+    private function unusableAnswer(Message $message, MessageSummary $summary, TypeSet $set, GatewayAnswer $answer): void
+    {
+        $key = "mailroom:typing:unusable-answers:{$message->id}:{$set->key}";
+        $attempts = (int) Cache::get($key, 0) + 1;
+
+        Log::warning('The gateway answered with a type the set does not define.', [
+            'message_id' => $message->id,
+            'type_set' => $set->key,
+            'decision_id' => $answer->decisionId,
+            'attempts' => $attempts,
+        ]);
+
+        if ($attempts < self::UNUSABLE_ANSWERS) {
+            Cache::put($key, $attempts, CarbonImmutable::now()->addDay());
+
+            return;
+        }
+
+        Cache::forget($key);
+        $this->save($message, $summary, $set, $this->fallback($set), null, DecidedBy::Gateway, false, $answer->decisionId);
+    }
+
+    /** The type that says least: the first with no label, else the last. */
+    private function fallback(TypeSet $set): string
+    {
+        foreach ($set->types as $type) {
+            if ($type->label === null) {
+                return $type->key;
+            }
+        }
+
+        return $set->types[count($set->types) - 1]->key;
+    }
+
+    /**
      * The label goes first: if it fails nothing is recorded, so the message is
-     * typed again rather than left typed with no label and no event.
+     * typed again rather than left typed with no label and no event. A tick
+     * that overlaps this one may get its typing in first; it has told the
+     * consumers, so this one stays quiet.
      */
     private function save(Message $message, MessageSummary $summary, TypeSet $set, string $type, ?float $confidence, DecidedBy $decidedBy, bool $confident, ?string $decisionId): void
     {
@@ -150,18 +199,21 @@ final readonly class Typist
             $this->mailroom->changeLabels($message->ref(), [$label], []);
         }
 
-        $typing = Typing::query()->create([
-            'message_id' => $message->id,
-            'type_set' => $set->key,
-            'type_set_version' => $set->version,
-            'type' => $type,
-            'confidence' => $confidence,
-            'decided_by' => $decidedBy,
-            'confident' => $confident,
-            'decision_id' => $decisionId,
-        ]);
+        $typing = Typing::query()->createOrFirst(
+            ['message_id' => $message->id, 'type_set' => $set->key, 'superseded_by_id' => null],
+            [
+                'type_set_version' => $set->version,
+                'type' => $type,
+                'confidence' => $confidence,
+                'decided_by' => $decidedBy,
+                'confident' => $confident,
+                'decision_id' => $decisionId,
+            ],
+        );
 
-        MessageTyped::dispatch($message->ref(), $set->key, $type, $confidence, $decidedBy, $confident, $typing->id);
+        if ($typing->wasRecentlyCreated) {
+            $this->announcer->announce($typing);
+        }
     }
 
     private function find(Mailbox $mailbox, string $providerMessageId): ?Message
@@ -206,12 +258,12 @@ final readonly class Typist
 
     private function state(MessageSummary $summary): string
     {
-        $pdfs = array_filter($summary->attachmentNames, fn (string $name): bool => str_ends_with(strtolower($name), '.pdf'));
+        $attachments = $summary->attachmentNames === [] ? 'none' : implode(', ', $summary->attachmentNames);
 
         return "From: {$summary->from}\n"
             ."Subject: {$summary->subject}\n"
             ."Date: {$summary->receivedAt->toRfc2822String()}\n"
-            .'PDF attachments: '.($pdfs === [] ? 'none' : implode(', ', $pdfs))."\n\n"
+            ."Attachments: {$attachments}\n\n"
             ."Body:\n{$summary->text}";
     }
 }

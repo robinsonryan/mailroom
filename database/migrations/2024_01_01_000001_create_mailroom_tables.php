@@ -58,6 +58,9 @@ return new class extends Migration
             $table->foreign('superseded_by_id')->references('id')->on($p.'typings')->nullOnDelete();
         });
 
+        // One current typing per message and set; superseded ones stay as history.
+        DB::statement("create unique index {$p}typings_one_current on {$p}typings (message_id, type_set) where superseded_by_id is null");
+
         // Every label change Mailroom itself makes, so the watcher can tell its
         // own writes from a person's corrections when the history echoes them.
         Schema::create($p.'label_writes', function (Blueprint $table) use ($p): void {

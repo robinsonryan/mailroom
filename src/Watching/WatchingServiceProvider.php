@@ -6,6 +6,7 @@ namespace RobinsonRyan\Mailroom\Watching;
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use RobinsonRyan\Mailroom\Console\AnnounceCommand;
 use RobinsonRyan\Mailroom\Console\WatchCommand;
 use RobinsonRyan\Mailroom\Console\WebhooksCommand;
 use RobinsonRyan\Mailroom\Contracts\Corrections;
@@ -26,7 +27,7 @@ final class WatchingServiceProvider extends ServiceProvider
         $this->app->bind(DecisionGateway::class, HttpDecisionGateway::class);
         $this->app->bind(Corrections::class, PersonCorrections::class);
 
-        $this->commands([WatchCommand::class, WebhooksCommand::class]);
+        $this->commands([WatchCommand::class, WebhooksCommand::class, AnnounceCommand::class]);
     }
 
     public function boot(): void
