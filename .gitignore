@@ -1,5 +1,6 @@
 /vendor/
 /node_modules/
+/.puppeteer-cache/
 composer.lock
 .phpunit.cache/
 .phpunit.result.cache
