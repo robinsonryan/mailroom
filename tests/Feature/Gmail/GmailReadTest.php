@@ -148,18 +148,63 @@ it('reports a message that is gone', function (Closure $call): void {
     'attachment' => [fn ($provider, $mailbox) => $provider->attachment($mailbox, 'gone', 'part')],
 ])->throws(MessageNotFound::class);
 
-it('does not count an image the HTML embeds by Content-ID as an attachment', function (): void {
-    $message = new GmailMessage([
-        'id' => 'm1',
-        'payload' => [
-            'mimeType' => 'multipart/related',
-            'parts' => [
-                ['mimeType' => 'text/html', 'body' => ['data' => rtrim(strtr(base64_encode('<p>Paid</p><img src="cid:logo">'), '+/', '-_'), '=')]],
-                ['mimeType' => 'image/png', 'filename' => 'logo.png', 'body' => ['attachmentId' => 'a1', 'size' => 900], 'headers' => [['name' => 'Content-ID', 'value' => '<logo>']]],
-                ['mimeType' => 'image/jpeg', 'filename' => 'invoice-photo.jpg', 'body' => ['attachmentId' => 'a2', 'size' => 90000], 'headers' => [['name' => 'Content-Disposition', 'value' => 'attachment']]],
-            ],
-        ],
-    ]);
+/**
+ * A message with this html (or plain text, when $html is null) and this image.
+ *
+ * @param  array<int, array{name: string, value: string}>  $headers
+ */
+function messageWithImage(?string $html, array $headers, int $size = 900, string $mime = 'image/png'): GmailMessage
+{
+    return new GmailMessage(['id' => 'm1', 'payload' => ['mimeType' => 'multipart/related', 'parts' => [
+        ['mimeType' => $html === null ? 'text/plain' : 'text/html', 'body' => ['data' => GmailApi::encode($html ?? 'See attached')]],
+        ['mimeType' => $mime, 'filename' => 'image.png', 'body' => ['attachmentId' => 'a1', 'size' => $size], 'headers' => $headers],
+    ]]]);
+}
 
-    expect(array_map(fn (Attachment $a): string => $a->filename, $message->attachments()))->toBe(['invoice-photo.jpg']);
+function contentId(string $id = '<logo>'): array
+{
+    return ['name' => 'Content-ID', 'value' => $id];
+}
+
+function disposition(string $value): array
+{
+    return ['name' => 'Content-Disposition', 'value' => $value];
+}
+
+it('embeds an image only when the HTML references it, it is not marked attachment, and it is small', function (GmailMessage $message): void {
+    expect($message->attachments())->toBe([]);
+})->with([
+    'no disposition' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()]),
+    'inline' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('inline; filename=image.png')]),
+    'header name in any case' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId() + ['name' => 'content-id']]),
+    'just under the limit' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()], 99_999),
+    'single quotes, upper case scheme' => fn (): GmailMessage => messageWithImage("<img src='CID:logo'>", [contentId()]),
+    'a CSS url' => fn (): GmailMessage => messageWithImage('<td style="background:url(&quot;cid:logo&quot;)">', [contentId()]),
+    'percent-encoded, as RFC 2392 writes it' => fn (): GmailMessage => messageWithImage('<img src="cid:image001.png%4001DA.ABCD">', [contentId('<image001.png@01DA.ABCD>')]),
+    'an entity in the reference' => fn (): GmailMessage => messageWithImage('<img src="cid:image001.png&#64;01DA.ABCD">', [contentId('<image001.png@01DA.ABCD>')]),
+]);
+
+it('keeps every other named image as an attachment', function (GmailMessage $message): void {
+    expect(array_map(fn (Attachment $a): string => $a->filename, $message->attachments()))->toBe(['image.png']);
+})->with([
+    'referenced but marked attachment (Outlook)' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('attachment; filename=image.png')]),
+    'marked Attachment in another case' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('Attachment; filename=image.png')]),
+    'inline with a plain body (Apple Mail photo)' => fn (): GmailMessage => messageWithImage(null, [contentId(), disposition('inline; filename=image.png')]),
+    'inline, html does not reference it' => fn (): GmailMessage => messageWithImage('<p>Photo attached</p>', [contentId(), disposition('inline; filename=image.png')]),
+    'another id starting the same' => fn (): GmailMessage => messageWithImage('<img src="cid:logo2">', [contentId()]),
+    'referenced but at the limit' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()], 100_000),
+    'no Content-ID' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', []),
+]);
+
+it('never reads a non-image with a Content-ID as embedded', function (): void {
+    $message = messageWithImage('<a href="cid:logo">Invoice</a>', [contentId()], mime: 'application/pdf');
+
+    expect($message->attachments())->toHaveCount(1);
+});
+
+it('does not read a nameless inline image as an attachment', function (): void {
+    GmailApi::fake(['messages/*' => Http::response(GmailApi::fixture('message-multipart'))]);
+
+    expect(array_map(fn (Attachment $a): string => $a->filename, $this->provider->content($this->mailbox, 'm')->attachments))
+        ->toBe(['invoice-10442.pdf', 'lines.csv']);
 });

@@ -14,6 +14,9 @@ use RobinsonRyan\Mailroom\Data\Attachment;
  */
 final readonly class GmailMessage
 {
+    /** At this size an image is a document someone attached, not a logo. */
+    private const EMBEDDED_IMAGE_LIMIT = 100_000;
+
     /** @var list<array<string, mixed>> text parts with their data inline */
     private array $bodies;
 
@@ -25,7 +28,12 @@ final readonly class GmailMessage
      */
     public function __construct(private array $resource)
     {
-        [$this->bodies, $this->attachments] = $this->walk((array) ($resource['payload'] ?? []));
+        [$this->bodies, $named] = $this->walk((array) ($resource['payload'] ?? []));
+
+        // The html decides which images are embedded, so it has to be read first.
+        $referenced = $this->referencedContentIds();
+        $attached = array_filter($named, fn (array $part): bool => ! $this->isEmbedded($part, $referenced));
+        $this->attachments = array_values(array_map($this->attachment(...), $attached));
     }
 
     /** base64url, the alphabet Gmail uses for every body and attachment. */
@@ -87,13 +95,11 @@ final readonly class GmailMessage
     }
 
     /**
-     * A part with a filename and an attachmentId is an attachment, and what it
-     * contains (an attached message's parts) belongs to it. Inline images (no
-     * filename, or a named image the HTML embeds by Content-ID, like a vendor's
-     * logo) count as neither body nor attachment.
+     * A part with a filename and an attachmentId is named, and what it contains
+     * (an attached message's parts) belongs to it.
      *
      * @param  array<string, mixed>  $part
-     * @return array{list<array<string, mixed>>, list<Attachment>}
+     * @return array{list<array<string, mixed>>, list<array<string, mixed>>} text parts, named parts
      */
     private function walk(array $part): array
     {
@@ -101,24 +107,31 @@ final readonly class GmailMessage
         $body = (array) ($part['body'] ?? []);
         $mime = strtolower((string) ($part['mimeType'] ?? ''));
 
-        if (str_starts_with($mime, 'image/') && $this->isEmbedded($part)) {
-            return [[], []];
-        }
-
         if ($filename !== '' && isset($body['attachmentId'])) {
-            return [[], [new Attachment((string) $body['attachmentId'], $filename, $mime, (int) ($body['size'] ?? 0))]];
+            return [[], [$part]];
         }
 
         $bodies = in_array($mime, ['text/plain', 'text/html'], true) && isset($body['data']) ? [$part] : [];
-        $attachments = [];
+        $named = [];
 
         foreach ((array) ($part['parts'] ?? []) as $child) {
-            [$childBodies, $childAttachments] = $this->walk((array) $child);
+            [$childBodies, $childNamed] = $this->walk((array) $child);
             $bodies = [...$bodies, ...$childBodies];
-            $attachments = [...$attachments, ...$childAttachments];
+            $named = [...$named, ...$childNamed];
         }
 
-        return [$bodies, $attachments];
+        return [$bodies, $named];
+    }
+
+    /** @param  array<string, mixed>  $part */
+    private function attachment(array $part): Attachment
+    {
+        return new Attachment(
+            (string) $part['body']['attachmentId'],
+            (string) $part['filename'],
+            strtolower((string) ($part['mimeType'] ?? '')),
+            (int) ($part['body']['size'] ?? 0),
+        );
     }
 
     /** The first part of this type, preferring inline parts over ones marked attachment. */
@@ -134,13 +147,19 @@ final readonly class GmailMessage
     /** @param  array<string, mixed>  $part */
     private function markedAttachment(array $part): bool
     {
+        return str_starts_with(strtolower($this->partHeader($part, 'Content-Disposition')), 'attachment');
+    }
+
+    /** @param  array<string, mixed>  $part */
+    private function partHeader(array $part, string $name): string
+    {
         foreach ((array) ($part['headers'] ?? []) as $header) {
-            if (strcasecmp((string) $header['name'], 'Content-Disposition') === 0) {
-                return str_starts_with(strtolower((string) $header['value']), 'attachment');
+            if (strcasecmp((string) ($header['name'] ?? ''), $name) === 0) {
+                return (string) ($header['value'] ?? '');
             }
         }
 
-        return false;
+        return '';
     }
 
     /**
@@ -156,15 +175,30 @@ final readonly class GmailMessage
     }
 
     /**
+     * Part of the page, like a vendor's logo, rather than a document. A photo
+     * of a receipt often carries a Content-ID too, so that alone proves nothing.
+     *
      * @param  array<string, mixed>  $part
+     * @param  list<string>  $referenced
      */
-    private function isEmbedded(array $part): bool
+    private function isEmbedded(array $part, array $referenced): bool
     {
-        $names = array_map(
-            fn (array $header): string => strtolower((string) ($header['name'] ?? '')),
-            array_values(array_filter((array) ($part['headers'] ?? []), is_array(...))),
-        );
+        return str_starts_with(strtolower((string) ($part['mimeType'] ?? '')), 'image/')
+            && ! $this->markedAttachment($part)
+            && (int) ($part['body']['size'] ?? 0) < self::EMBEDDED_IMAGE_LIMIT
+            && in_array(trim($this->partHeader($part, 'Content-ID'), ' <>'), $referenced, true);
+    }
 
-        return in_array('content-id', $names, true);
+    /**
+     * The Content-IDs the html body points at. RFC 2392 percent-encodes them
+     * inside a cid: URL.
+     *
+     * @return list<string>
+     */
+    private function referencedContentIds(): array
+    {
+        preg_match_all('/\bcid:([^\s"\'<>()]+)/i', html_entity_decode((string) $this->html(), ENT_QUOTES | ENT_HTML5, 'UTF-8'), $matches);
+
+        return array_map(rawurldecode(...), $matches[1]);
     }
 }
