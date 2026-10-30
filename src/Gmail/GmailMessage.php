@@ -88,8 +88,9 @@ final readonly class GmailMessage
 
     /**
      * A part with a filename and an attachmentId is an attachment, and what it
-     * contains (an attached message's parts) belongs to it. Inline images have
-     * no filename, so they count as neither body nor attachment.
+     * contains (an attached message's parts) belongs to it. Inline images (no
+     * filename, or a named image the HTML embeds by Content-ID, like a vendor's
+     * logo) count as neither body nor attachment.
      *
      * @param  array<string, mixed>  $part
      * @return array{list<array<string, mixed>>, list<Attachment>}
@@ -99,6 +100,10 @@ final readonly class GmailMessage
         $filename = (string) ($part['filename'] ?? '');
         $body = (array) ($part['body'] ?? []);
         $mime = strtolower((string) ($part['mimeType'] ?? ''));
+
+        if (str_starts_with($mime, 'image/') && $this->isEmbedded($part)) {
+            return [[], []];
+        }
 
         if ($filename !== '' && isset($body['attachmentId'])) {
             return [[], [new Attachment((string) $body['attachmentId'], $filename, $mime, (int) ($body['size'] ?? 0))]];
@@ -148,5 +153,18 @@ final readonly class GmailMessage
         $text = html_entity_decode(strip_tags(str_replace('<', ' <', $html)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    }
+
+    /**
+     * @param  array<string, mixed>  $part
+     */
+    private function isEmbedded(array $part): bool
+    {
+        $names = array_map(
+            fn (array $header): string => strtolower((string) ($header['name'] ?? '')),
+            array_values(array_filter((array) ($part['headers'] ?? []), is_array(...))),
+        );
+
+        return in_array('content-id', $names, true);
     }
 }

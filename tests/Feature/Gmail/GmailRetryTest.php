@@ -5,6 +5,7 @@ declare(strict_types=1);
 use GuzzleHttp\Promise\Create;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use RobinsonRyan\Mailroom\Data\OutgoingMessage;
 use RobinsonRyan\Mailroom\Exceptions\ProviderUnavailable;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
@@ -95,4 +96,31 @@ it('retries a dropped connection and reports it as unavailable', function (): vo
     expect(fn () => $this->provider->currentCursor($this->mailbox))->toThrow(ProviderUnavailable::class);
 
     expect($this->slept)->toBe([1, 4, 16]);
+});
+
+it('never repeats a send after a 5xx, which may mean Gmail accepted it', function (): void {
+    GmailApi::fake(['messages/send' => Http::response(GmailApi::fixture('error-backend'), 503)]);
+
+    expect(fn () => $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')))
+        ->toThrow(ProviderUnavailable::class);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/send'))->toHaveCount(1);
+});
+
+it('retries a send refused by the rate limit, which Gmail did not accept', function (): void {
+    GmailApi::fake(['messages/send' => Http::sequence()
+        ->push(GmailApi::fixture('error-rate-limit'), 429)
+        ->push(['id' => 'sent1', 'threadId' => 't1'])]);
+
+    expect($this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')))->toBe('sent1');
+});
+
+it('caps a long Retry-After at a minute', function (): void {
+    GmailApi::fake(['profile' => Http::sequence()
+        ->push(GmailApi::fixture('error-rate-limit'), 429, ['Retry-After' => '86400'])
+        ->push(GmailApi::fixture('profile'))]);
+
+    $this->provider->currentCursor($this->mailbox);
+
+    expect($this->slept)->toBe([60]);
 });

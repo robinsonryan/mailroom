@@ -17,14 +17,11 @@ use RobinsonRyan\Mailroom\TypeSets\TypeSetRegistry;
  */
 final class MailroomServiceProvider extends ServiceProvider
 {
-    /**
-     * Each module's provider, registered when its code is present. Listed
-     * here (not in composer.json) so modules can be built independently.
-     */
+    /** The modules' own providers: each binds its implementations. */
     private const MODULE_PROVIDERS = [
-        'RobinsonRyan\\Mailroom\\Gmail\\GmailServiceProvider',
-        'RobinsonRyan\\Mailroom\\Watching\\WatchingServiceProvider',
-        'RobinsonRyan\\Mailroom\\Pdf\\PdfServiceProvider',
+        Gmail\GmailServiceProvider::class,
+        Watching\WatchingServiceProvider::class,
+        Pdf\PdfServiceProvider::class,
     ];
 
     public function register(): void
@@ -37,25 +34,9 @@ final class MailroomServiceProvider extends ServiceProvider
         $this->app->bindIf(Corrections::class, UnboundCorrections::class);
         $this->app->singleton(Mailroom::class);
 
-        foreach ($this->moduleProviders() as $provider) {
-            if (class_exists($provider)) {
-                $this->app->register($provider);
-            }
+        foreach (self::MODULE_PROVIDERS as $provider) {
+            $this->app->register($provider);
         }
-    }
-
-    /**
-     * Typed as plain strings on purpose: a module's provider class may not
-     * exist yet in a given checkout.
-     *
-     * @return list<string>
-     */
-    private function moduleProviders(): array
-    {
-        /** @var list<string> $providers */
-        $providers = config('mailroom.module_providers', self::MODULE_PROVIDERS);
-
-        return $providers;
     }
 
     public function boot(): void

@@ -15,6 +15,7 @@ coverage/
 .workspace
 
 # Claude harness symlinks (managed by link.sh, not committed)
+.claude/worktrees/
 .claude/agents
 .claude/constitution.md
 .claude/imports

@@ -141,21 +141,21 @@ final readonly class GmailProvider implements MailProvider
         $response = $this->client->request($mailbox, 'POST', 'messages', ['internalDateSource' => 'dateHeader'], [
             'raw' => $this->encodeRaw($rawMime),
             'labelIds' => $labelIds,
-        ]);
+        ], repeatable: false);
 
         return (string) $this->client->json($response)['id'];
     }
 
     public function draft(Mailbox $mailbox, OutgoingMessage $message): string
     {
-        $response = $this->client->request($mailbox, 'POST', 'drafts', body: ['message' => $this->outgoing($mailbox, $message)]);
+        $response = $this->client->request($mailbox, 'POST', 'drafts', body: ['message' => $this->outgoing($mailbox, $message)], repeatable: false);
 
         return (string) $this->client->json($response)['id'];
     }
 
     public function send(Mailbox $mailbox, OutgoingMessage $message): string
     {
-        $response = $this->client->request($mailbox, 'POST', 'messages/send', body: $this->outgoing($mailbox, $message));
+        $response = $this->client->request($mailbox, 'POST', 'messages/send', body: $this->outgoing($mailbox, $message), repeatable: false);
 
         return (string) $this->client->json($response)['id'];
     }

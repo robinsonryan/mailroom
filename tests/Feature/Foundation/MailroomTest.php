@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Exceptions\LabelOutsidePrefix;
+use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Mailroom;
 use RobinsonRyan\Mailroom\Models\LabelWrite;
 use RobinsonRyan\Mailroom\Models\Mailbox;
@@ -66,4 +67,13 @@ it('returns attachment bytes and full content through the provider', function ()
     expect($content->attachments)->toHaveCount(1)
         ->and($content->attachments[0]->filename)->toBe('inv.pdf')
         ->and($this->mailroom->attachment($ref, $content->attachments[0]->partId))->toBe('%PDF-1.4 x');
+});
+
+it('forgets a label write when the provider call fails', function (): void {
+    $id = $this->fake->deliver('info@example.com');
+    $ref = $this->fake->ref($this->mailbox, $id);
+    $this->fake->disconnect('info@example.com');
+
+    expect(fn () => $this->mailroom->label($ref, 'Invoices/Filed'))->toThrow(MailboxDisconnected::class)
+        ->and(LabelWrite::query()->count())->toBe(0);
 });

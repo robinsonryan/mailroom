@@ -17,6 +17,7 @@ use RobinsonRyan\Mailroom\Models\Mailbox;
 use RobinsonRyan\Mailroom\Models\Message;
 use RobinsonRyan\Mailroom\Models\Typing;
 use RobinsonRyan\Mailroom\TypeSets\TypeSetRegistry;
+use Throwable;
 
 /**
  * The consumer-facing surface (Contract A operations). Everything here takes a
@@ -108,15 +109,27 @@ final readonly class Mailroom
         $mailbox = $this->mailboxFor($ref);
         $message = $this->record($ref);
 
+        // Recorded before the call so a fast watcher tick can't see the echo first;
+        // dropped if the call fails, or an unechoed row would swallow a person's change.
+        $writes = [];
+
         foreach ($add as $name) {
-            LabelWrite::query()->create(['message_id' => $message->id, 'label' => $name, 'action' => LabelAction::Add]);
+            $writes[] = LabelWrite::query()->create(['message_id' => $message->id, 'label' => $name, 'action' => LabelAction::Add]);
         }
 
         foreach ($remove as $name) {
-            LabelWrite::query()->create(['message_id' => $message->id, 'label' => $name, 'action' => LabelAction::Remove]);
+            $writes[] = LabelWrite::query()->create(['message_id' => $message->id, 'label' => $name, 'action' => LabelAction::Remove]);
         }
 
-        $this->providers->for($mailbox)->changeLabels($mailbox, $ref->providerMessageId, $add, $remove);
+        try {
+            $this->providers->for($mailbox)->changeLabels($mailbox, $ref->providerMessageId, $add, $remove);
+        } catch (Throwable $e) {
+            foreach ($writes as $write) {
+                $write->delete();
+            }
+
+            throw $e;
+        }
     }
 
     public function archive(MessageRef $ref): void

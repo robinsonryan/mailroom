@@ -34,6 +34,9 @@ final readonly class GmailClient
     /** @var list<int> seconds to wait before each retry */
     private const BACKOFF = [1, 4, 16];
 
+    /** The longest a Retry-After header may hold a worker, in seconds. */
+    private const MAX_WAIT = 60;
+
     private const RATE_LIMIT_REASONS = ['rateLimitExceeded', 'userRateLimitExceeded'];
 
     /** @var Closure(int): void */
@@ -59,24 +62,27 @@ final readonly class GmailClient
      *
      * @param  array<string, mixed>  $query  list values become repeated parameters
      * @param  array<string, mixed>|null  $body  sent as JSON
+     * @param  bool  $repeatable  false for calls that create something (send, insert, draft):
+     *                            a 5xx or dropped connection may mean Gmail accepted it, so only
+     *                            an explicit rate-limit refusal is retried
      *
      * @throws MailboxDisconnected
      * @throws ProviderUnavailable
      */
-    public function request(Mailbox $mailbox, string $method, string $path, array $query = [], ?array $body = null): Response
+    public function request(Mailbox $mailbox, string $method, string $path, array $query = [], ?array $body = null, bool $repeatable = true): Response
     {
         $url = $this->url($path, $query);
         $options = $body === null ? [] : ['json' => $body];
         $call = fn (): Response => Http::withToken($this->accessToken($mailbox))->acceptJson()->send($method, $url, $options);
 
-        $response = $this->withRetries($call);
+        $response = $this->withRetries($call, $repeatable);
 
         if ($response->status() !== 401) {
             return $response;
         }
 
         $this->cache->forget(self::TOKEN_CACHE.$mailbox->identity);
-        $response = $this->withRetries($call);
+        $response = $this->withRetries($call, $repeatable);
 
         if ($response->status() === 401) {
             throw new MailboxDisconnected("{$mailbox->address} refused its credentials.");
@@ -171,7 +177,7 @@ final readonly class GmailClient
      *
      * @throws ProviderUnavailable
      */
-    private function withRetries(Closure $call): Response
+    private function withRetries(Closure $call, bool $repeatable = true): Response
     {
         foreach (self::BACKOFF as $seconds) {
             $response = $this->attempt($call);
@@ -180,7 +186,11 @@ final readonly class GmailClient
                 return $response;
             }
 
-            ($this->sleep)(max($seconds, $response instanceof Response ? $this->retryAfter($response) : 0));
+            if (! $repeatable && (! $response instanceof Response || ! $this->isRateLimited($response))) {
+                throw new ProviderUnavailable('Gmail failed on a call that must not be repeated.');
+            }
+
+            ($this->sleep)(min(self::MAX_WAIT, max($seconds, $response instanceof Response ? $this->retryAfter($response) : 0)));
         }
 
         $response = $this->attempt($call);
@@ -206,7 +216,12 @@ final readonly class GmailClient
 
     private function isTransient(Response $response): bool
     {
-        if ($response->status() === 429 || $response->serverError()) {
+        return $response->serverError() || $this->isRateLimited($response);
+    }
+
+    private function isRateLimited(Response $response): bool
+    {
+        if ($response->status() === 429) {
             return true;
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Http;
 use RobinsonRyan\Mailroom\Data\Attachment;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Gmail\GmailMessage;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
 beforeEach(function (): void {
@@ -146,3 +147,19 @@ it('reports a message that is gone', function (Closure $call): void {
     'content' => [fn ($provider, $mailbox) => $provider->content($mailbox, 'gone')],
     'attachment' => [fn ($provider, $mailbox) => $provider->attachment($mailbox, 'gone', 'part')],
 ])->throws(MessageNotFound::class);
+
+it('does not count an image the HTML embeds by Content-ID as an attachment', function (): void {
+    $message = new GmailMessage([
+        'id' => 'm1',
+        'payload' => [
+            'mimeType' => 'multipart/related',
+            'parts' => [
+                ['mimeType' => 'text/html', 'body' => ['data' => rtrim(strtr(base64_encode('<p>Paid</p><img src="cid:logo">'), '+/', '-_'), '=')]],
+                ['mimeType' => 'image/png', 'filename' => 'logo.png', 'body' => ['attachmentId' => 'a1', 'size' => 900], 'headers' => [['name' => 'Content-ID', 'value' => '<logo>']]],
+                ['mimeType' => 'image/jpeg', 'filename' => 'invoice-photo.jpg', 'body' => ['attachmentId' => 'a2', 'size' => 90000], 'headers' => [['name' => 'Content-Disposition', 'value' => 'attachment']]],
+            ],
+        ],
+    ]);
+
+    expect(array_map(fn (Attachment $a): string => $a->filename, $message->attachments()))->toBe(['invoice-photo.jpg']);
+});
