@@ -101,6 +101,12 @@ final class GmailApi
         return $matches;
     }
 
+    /** base64url with no padding, the way Gmail delivers a body. */
+    public static function encode(string $bytes): string
+    {
+        return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+    }
+
     public static function decodeRaw(string $raw): string
     {
         expect($raw)->not->toContain('+')->not->toContain('/');

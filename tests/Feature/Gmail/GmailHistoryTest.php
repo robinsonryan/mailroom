@@ -8,6 +8,19 @@ use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
+/**
+ * A history page in which one message lost a label.
+ *
+ * @param  list<string>  $current  the labels it still carries
+ * @return array<string, mixed>
+ */
+function removedLabel(string $label, array $current): array
+{
+    return ['historyId' => '2', 'history' => [['id' => '1', 'labelsRemoved' => [
+        ['message' => ['id' => 'm1', 'threadId' => 't1', 'labelIds' => $current], 'labelIds' => [$label]],
+    ]]]];
+}
+
 beforeEach(function (): void {
     $this->provider = GmailApi::provider();
     $this->mailbox = GmailApi::mailbox();
@@ -56,6 +69,42 @@ it('skips messages carrying DRAFT, SPAM or TRASH', function (): void {
     expect($ids)->not->toContain('ccc3')->not->toContain('ddd4')->not->toContain('eee5');
 });
 
+it('surfaces a message rescued from Spam as an arrival, on the poll that sees the rescue', function (): void {
+    GmailApi::fake([
+        'history*' => Http::sequence()
+            ->push(['history' => [['id' => '1', 'messagesAdded' => [['message' => ['id' => 'ddd4', 'threadId' => 'tddd', 'labelIds' => ['UNREAD', 'SPAM']]]]]], 'historyId' => '2'])
+            ->push(GmailApi::fixture('history-rescued-from-spam')),
+    ]);
+
+    $skipped = $this->provider->history($this->mailbox, '1');
+    $rescued = $this->provider->history($this->mailbox, '2');
+
+    expect($skipped->changes)->toBe([])
+        ->and(array_map(fn (HistoryChange $c): array => [$c->kind, $c->providerMessageId, $c->threadId, $c->labels], $rescued->changes))->toBe([
+            [ChangeKind::MessageAdded, 'ddd4', 'tddd', []],
+            [ChangeKind::LabelAdded, 'ddd4', 'tddd', ['INBOX']],
+            [ChangeKind::LabelRemoved, 'ddd4', 'tddd', ['SPAM']],
+        ]);
+});
+
+it('surfaces a message restored from Trash as an arrival', function (): void {
+    GmailApi::fake(['history*' => Http::response(removedLabel('TRASH', ['INBOX']))]);
+
+    $change = $this->provider->history($this->mailbox, '1')->changes[0];
+
+    expect($change->kind)->toBe(ChangeKind::MessageAdded)
+        ->and($change->providerMessageId)->toBe('m1');
+});
+
+it('does not surface a message that left one hidden state for another', function (string $removed, array $current): void {
+    GmailApi::fake(['history*' => Http::response(removedLabel($removed, $current))]);
+
+    expect($this->provider->history($this->mailbox, '1')->changes)->toBe([]);
+})->with([
+    'moved from Spam to Trash' => ['SPAM', ['TRASH']],
+    'restored from Trash but still a draft' => ['TRASH', ['DRAFT']],
+]);
+
 it('returns the new cursor when nothing changed', function (): void {
     GmailApi::fake(['history*' => Http::response(GmailApi::fixture('history-empty'))]);
 
@@ -95,6 +144,49 @@ it('refreshes the map when history names a label it has not seen', function (): 
     $page = $this->provider->history($this->mailbox, '2');
 
     expect($page->changes[0]->labels)->toBe(['Invoices/Payment problem']);
+});
+
+/** One poll that warms the label map, then one naming a deleted label and a new one. */
+function fakeDeletedAndNewLabel(): void
+{
+    $entry = fn (string $id, string $label): array => ['message' => ['id' => $id, 'threadId' => 't'.$id, 'labelIds' => ['INBOX']], 'labelIds' => [$label]];
+
+    GmailApi::fake([
+        'history*' => Http::sequence()
+            ->push(GmailApi::fixture('history-page-2'))
+            ->push(['historyId' => '9', 'history' => [
+                ['id' => '7', 'labelsAdded' => [$entry('deleted', 'Label_12')]],
+                ['id' => '8', 'labelsAdded' => [$entry('created', 'Label_99')]],
+            ]]),
+        'labels' => fn (Illuminate\Http\Client\Request $request) => match (true) {
+            $request->method() === 'POST' => Http::response(['id' => 'Label_100', 'name' => $request['name']]),
+            count(GmailApi::requests(GmailApi::BASE.'labels')) === 0 => Http::response(GmailApi::fixture('labels')),
+            default => Http::response(['labels' => [['id' => 'Label_99', 'name' => 'Invoices/Payment problem']]]),
+        },
+        'messages/*/modify' => Http::response(['id' => 'm1']),
+    ]);
+}
+
+it('still names a label it knew when a new label refreshes the map in the same poll', function (): void {
+    fakeDeletedAndNewLabel();
+
+    $this->provider->history($this->mailbox, '1');
+    $page = $this->provider->history($this->mailbox, '2');
+
+    expect(array_map(fn (HistoryChange $c): array => [$c->providerMessageId, $c->labels], $page->changes))->toBe([
+        ['deleted', ['Invoices/Invoice']],
+        ['created', ['Invoices/Payment problem']],
+    ]);
+});
+
+it('does not write to a deleted label it still names for history', function (): void {
+    fakeDeletedAndNewLabel();
+
+    $this->provider->history($this->mailbox, '1');
+    $this->provider->history($this->mailbox, '2');
+    $this->provider->changeLabels($this->mailbox, 'm1', ['Invoices/Invoice'], []);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/m1/modify')[0]['addLabelIds'])->toBe(['Label_100']);
 });
 
 it('leaves out labels deleted since, refreshing once per poll', function (): void {

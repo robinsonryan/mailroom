@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use RobinsonRyan\Mailroom\Data\OutgoingMessage;
+use RobinsonRyan\Mailroom\Enums\MailboxStatus;
+use RobinsonRyan\Mailroom\Events\MailboxLostAccess;
 use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Exceptions\MissingCredentials;
 use RobinsonRyan\Mailroom\Exceptions\ProviderUnavailable;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
+use RobinsonRyan\Mailroom\Watching\Watcher;
 
 beforeEach(function (): void {
     $this->slept = [];
@@ -106,13 +111,51 @@ it('treats a second 401 as a disconnected mailbox, after one refresh only', func
         ->and(GmailApi::requests(GmailApi::BASE.'profile'))->toHaveCount(2);
 });
 
+it('reports a token endpoint that refuses the client for good as a disconnected mailbox', function (string $error, int $status): void {
+    GmailApi::fake([GmailApi::TOKEN_URL => Http::response(['error' => $error, 'error_description' => 'Refused.'], $status)]);
+
+    expect(fn () => $this->provider->currentCursor($this->mailbox))->toThrow(MailboxDisconnected::class);
+
+    expect(GmailApi::requests(GmailApi::TOKEN_URL))->toHaveCount(1)
+        ->and(GmailApi::requests(GmailApi::BASE.'*'))->toBeEmpty();
+})->with([
+    'invalid_client' => ['invalid_client', 401],
+    'unauthorized_client' => ['unauthorized_client', 400],
+]);
+
 it('does not read other token failures as a disconnected mailbox', function (): void {
-    GmailApi::fake([GmailApi::TOKEN_URL => Http::response(GmailApi::fixture('token-invalid-client'), 401)]);
+    GmailApi::fake([GmailApi::TOKEN_URL => Http::response(['error' => 'invalid_request'], 400)]);
 
     expect(fn () => $this->provider->currentCursor($this->mailbox))->toThrow(ProviderUnavailable::class);
 
     expect(GmailApi::requests(GmailApi::TOKEN_URL))->toHaveCount(1);
 });
+
+it('reports a grant without the access it needs as a disconnected mailbox', function (Closure $call, string $url): void {
+    GmailApi::fake([$url => Http::response(GmailApi::fixture('error-insufficient-permissions'), 403)]);
+
+    expect(fn () => $call($this->provider, $this->mailbox))->toThrow(MailboxDisconnected::class);
+
+    expect(GmailApi::requests(GmailApi::BASE.$url))->toHaveCount(1)
+        ->and($this->slept)->toBe([]);
+})->with([
+    'a read' => [fn ($provider, $mailbox) => $provider->currentCursor($mailbox), 'profile'],
+    'a label write' => [fn ($provider, $mailbox) => $provider->archive($mailbox, 'm1'), 'messages/m1/modify'],
+    'a send' => [fn ($provider, $mailbox) => $provider->send($mailbox, new OutgoingMessage(['a@vendor.example'], 'Hi', 'Body')), 'messages/send'],
+]);
+
+it('tells a person when the watcher meets a permanent refusal', function (string $route, array $response, int $status): void {
+    Event::fake([MailboxLostAccess::class]);
+    GmailApi::fake([$route => Http::response($response, $status)]);
+
+    app(Watcher::class)->tick($this->mailbox);
+
+    expect($this->mailbox->refresh()->status)->toBe(MailboxStatus::Disconnected);
+    Event::assertDispatched(MailboxLostAccess::class);
+})->with([
+    'a regenerated client secret' => [GmailApi::TOKEN_URL, GmailApi::fixture('token-invalid-client'), 401],
+    'a narrowed grant' => ['profile', GmailApi::fixture('error-insufficient-permissions'), 403],
+]);
 
 it('retries a token endpoint outage', function (): void {
     GmailApi::fake([

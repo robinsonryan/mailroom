@@ -29,6 +29,9 @@ final readonly class GmailProvider implements MailProvider
 
     private const IGNORED_LABELS = ['DRAFT', 'SPAM', 'TRASH'];
 
+    /** Leaving one of these is the only arrival Gmail reports for a message skipped in it. */
+    private const RESCUE_LABELS = ['SPAM', 'TRASH'];
+
     public function __construct(
         private GmailClient $client,
         private GmailLabels $labels,
@@ -112,10 +115,13 @@ final readonly class GmailProvider implements MailProvider
 
     public function attachment(Mailbox $mailbox, string $providerMessageId, string $partId): string
     {
-        $path = "{$this->messagePath($providerMessageId)}/attachments/".rawurlencode($partId);
-        $response = $this->client->request($mailbox, 'GET', $path);
+        $body = (new GmailMessage($this->resource($mailbox, $providerMessageId, 'full')))->partBody($partId);
 
-        return GmailMessage::decode((string) $this->messageJson($response, $mailbox, $providerMessageId)['data']);
+        if (! isset($body['data']) && ! isset($body['attachmentId'])) {
+            throw new MessageNotFound("No part {$partId} in message {$providerMessageId}.");
+        }
+
+        return GmailMessage::decode((string) ($body['data'] ?? $this->storedData($mailbox, $providerMessageId, (string) $body['attachmentId'])));
     }
 
     public function changeLabels(Mailbox $mailbox, string $providerMessageId, array $add, array $remove): void
@@ -162,7 +168,9 @@ final readonly class GmailProvider implements MailProvider
 
     /**
      * Gmail lists a record's own label ids per entry, and the message's current
-     * labels alongside; DRAFT, SPAM and TRASH are read from the latter.
+     * labels alongside; DRAFT, SPAM and TRASH are read from the latter. A message
+     * rescued from Spam or Trash arrives here: it was skipped when it landed, and
+     * the watcher passes over one it has already typed.
      *
      * @param  array<int|string, mixed>  $records
      * @return list<HistoryChange>
@@ -175,7 +183,13 @@ final readonly class GmailProvider implements MailProvider
         foreach ($records as $record) {
             foreach ($record['messagesAdded'] ?? [] as $entry) {
                 if (! $this->ignored($entry)) {
-                    $changes[] = new HistoryChange(ChangeKind::MessageAdded, (string) $entry['message']['id'], (string) $entry['message']['threadId']);
+                    $changes[] = $this->arrival($entry);
+                }
+            }
+
+            foreach ($record['labelsRemoved'] ?? [] as $entry) {
+                if (array_intersect($entry['labelIds'], self::RESCUE_LABELS) !== [] && ! $this->ignored($entry)) {
+                    $changes[] = $this->arrival($entry);
                 }
             }
 
@@ -187,6 +201,12 @@ final readonly class GmailProvider implements MailProvider
         }
 
         return $changes;
+    }
+
+    /** @param  array<string, mixed>  $entry  a history entry holding a message */
+    private function arrival(array $entry): HistoryChange
+    {
+        return new HistoryChange(ChangeKind::MessageAdded, (string) $entry['message']['id'], (string) $entry['message']['threadId']);
     }
 
     /**
@@ -234,15 +254,41 @@ final readonly class GmailProvider implements MailProvider
 
     private function message(Mailbox $mailbox, string $id, string $format): GmailMessage
     {
+        $message = new GmailMessage($this->resource($mailbox, $id, $format));
+        $stored = [];
+
+        foreach ($message->storedBodies() as $attachmentId) {
+            $stored[$attachmentId] = $this->storedData($mailbox, $id, $attachmentId);
+        }
+
+        return $stored === [] ? $message : $message->withBodies($stored);
+    }
+
+    /** The base64url content Gmail keeps apart from the message. */
+    private function storedData(Mailbox $mailbox, string $id, string $attachmentId): string
+    {
+        $path = "{$this->messagePath($id)}/attachments/".rawurlencode($attachmentId);
+
+        return (string) $this->messageJson($this->client->request($mailbox, 'GET', $path), $mailbox, $id)['data'];
+    }
+
+    /** @return array<string, mixed> */
+    private function resource(Mailbox $mailbox, string $id, string $format): array
+    {
         $response = $this->client->request($mailbox, 'GET', $this->messagePath($id), ['format' => $format]);
 
-        return new GmailMessage($this->messageJson($response, $mailbox, $id));
+        return $this->messageJson($response, $mailbox, $id);
     }
 
     /** @param  array<string, mixed>  $body */
     private function modify(Mailbox $mailbox, string $id, array $body): void
     {
         $response = $this->client->request($mailbox, 'POST', "{$this->messagePath($id)}/modify", body: $body);
+
+        if ($response->status() === 400) {
+            $this->labels->forget($mailbox);
+        }
+
         $this->messageJson($response, $mailbox, $id);
     }
 

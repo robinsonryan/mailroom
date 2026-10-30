@@ -96,8 +96,8 @@ it('reads the full message: headers, both bodies and its attachments', function 
         ->and($content->html)->toContain('<b>$1,284.50</b>');
 
     expect(array_map(fn (Attachment $a): array => [$a->partId, $a->filename, $a->mime, $a->size], $content->attachments))->toBe([
-        ['ANGjdJ_invoice_pdf', 'invoice-10442.pdf', 'application/pdf', 224408],
-        ['ANGjdJ_lines_csv', 'lines.csv', 'text/csv', 512],
+        ['1', 'invoice-10442.pdf', 'application/pdf', 224408],
+        ['2', 'lines.csv', 'text/csv', 512],
     ]);
 });
 
@@ -132,10 +132,158 @@ it('treats an attached message as one attachment and prefers the inline text', f
 });
 
 it('returns an attachment\'s bytes', function (): void {
-    GmailApi::fake(['messages/19a2f0c1d2e3f405/attachments/ANGjdJ_invoice_pdf' => Http::response(GmailApi::fixture('attachment'))]);
+    GmailApi::fake([
+        'messages/19a2f0c1d2e3f405/attachments/ANGjdJ_invoice_pdf' => Http::response(GmailApi::fixture('attachment')),
+        'messages/19a2f0c1d2e3f405?*' => Http::response(GmailApi::fixture('message-multipart')),
+    ]);
 
-    expect($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', 'ANGjdJ_invoice_pdf'))
+    expect($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', '1'))
         ->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
+});
+
+it('names an attachment by its part, which outlives the attachment id Gmail hands out per read', function (): void {
+    $reread = GmailApi::fixture('message-multipart');
+    $reread['payload']['parts'][1]['body']['attachmentId'] = 'ANGjdJ_reissued';
+    GmailApi::fake([
+        'messages/19a2f0c1d2e3f405/attachments/ANGjdJ_reissued' => Http::response(GmailApi::fixture('attachment')),
+        'messages/19a2f0c1d2e3f405?*' => Http::sequence()
+            ->push(GmailApi::fixture('message-multipart'))
+            ->push($reread)
+            ->push($reread),
+    ]);
+
+    $first = $this->provider->content($this->mailbox, '19a2f0c1d2e3f405')->attachments[0]->partId;
+    $second = $this->provider->content($this->mailbox, '19a2f0c1d2e3f405')->attachments[0]->partId;
+
+    expect($second)->toBe($first)
+        ->and($this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', $first))->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
+});
+
+it('reports a part the message does not hold as not found', function (): void {
+    GmailApi::fake(['messages/19a2f0c1d2e3f405?*' => Http::response(GmailApi::fixture('message-multipart'))]);
+
+    expect(fn () => $this->provider->attachment($this->mailbox, '19a2f0c1d2e3f405', '9'))
+        ->toThrow(MessageNotFound::class, 'No part 9');
+});
+
+it('fetches a message that is nothing but its attachment, whose part id is empty', function (): void {
+    $message = ['id' => 'm1', 'threadId' => 't1', 'payload' => [
+        'partId' => '', 'mimeType' => 'application/pdf', 'filename' => 'scan.pdf',
+        'body' => ['attachmentId' => 'a1', 'size' => 2048],
+    ]];
+    GmailApi::fake([
+        'messages/m1/attachments/a1' => Http::response(GmailApi::fixture('attachment')),
+        'messages/m1?*' => Http::response($message),
+    ]);
+
+    $partId = $this->provider->content($this->mailbox, 'm1')->attachments[0]->partId;
+
+    expect($partId)->toBe('')
+        ->and($this->provider->attachment($this->mailbox, 'm1', $partId))->toBe("%PDF-1.7\xff\xfe\x00 fixture bytes");
+});
+
+it('lists and fetches an attachment Gmail delivered inline, with no attachmentId', function (): void {
+    $bytes = "%PDF-1.7\xff\xfe\x00 inline bytes";
+    $message = ['id' => 'm1', 'threadId' => 't1', 'payload' => ['partId' => '', 'mimeType' => 'multipart/mixed', 'parts' => [
+        ['partId' => '0', 'mimeType' => 'text/plain', 'body' => ['size' => 4, 'data' => GmailApi::encode('Body')]],
+        ['partId' => '1', 'mimeType' => 'application/pdf', 'filename' => 'invoice.pdf', 'body' => ['size' => strlen($bytes), 'data' => GmailApi::encode($bytes)]],
+    ]]];
+    GmailApi::fake(['messages/m1?*' => Http::response($message)]);
+
+    $attachments = $this->provider->content($this->mailbox, 'm1')->attachments;
+
+    expect(array_map(fn (Attachment $a): array => [$a->partId, $a->filename, $a->mime, $a->size], $attachments))->toBe([['1', 'invoice.pdf', 'application/pdf', strlen($bytes)]])
+        ->and($this->provider->attachment($this->mailbox, 'm1', '1'))->toBe($bytes)
+        ->and(GmailApi::requests('*attachments*'))->toBeEmpty();
+});
+
+it('keeps a named text part with inline data readable as well as attached', function (): void {
+    $message = ['id' => 'm1', 'threadId' => 't1', 'payload' => [
+        'partId' => '', 'mimeType' => 'text/plain', 'filename' => 'note.txt',
+        'body' => ['size' => 9, 'data' => GmailApi::encode('Pay this.')],
+    ]];
+    GmailApi::fake(['messages/m1?*' => Http::response($message)]);
+
+    $content = $this->provider->content($this->mailbox, 'm1');
+
+    expect($content->text)->toBe('Pay this.')
+        ->and($content->attachments[0]->filename)->toBe('note.txt');
+});
+
+it('leaves out a named part with no bytes at all', function (): void {
+    $message = ['id' => 'm1', 'threadId' => 't1', 'payload' => ['partId' => '', 'mimeType' => 'multipart/mixed', 'parts' => [
+        ['partId' => '0', 'mimeType' => 'application/pdf', 'filename' => 'empty.pdf', 'body' => ['size' => 0]],
+    ]]];
+    GmailApi::fake(['messages/m1?*' => Http::response($message)]);
+
+    expect($this->provider->content($this->mailbox, 'm1')->attachments)->toBe([])
+        ->and(fn () => $this->provider->attachment($this->mailbox, 'm1', '0'))->toThrow(MessageNotFound::class);
+});
+
+/**
+ * A message whose text parts Gmail stored apart from it.
+ *
+ * @return array<string, mixed>
+ */
+function messageWithStoredBodies(): array
+{
+    return ['id' => 'm1', 'threadId' => 't1', 'payload' => ['partId' => '', 'mimeType' => 'multipart/related', 'parts' => [
+        ['partId' => '0', 'mimeType' => 'multipart/alternative', 'parts' => [
+            ['partId' => '0.0', 'mimeType' => 'text/plain', 'body' => ['size' => 11, 'attachmentId' => 'text-token']],
+            ['partId' => '0.1', 'mimeType' => 'text/html', 'body' => ['size' => 26, 'attachmentId' => 'html-token']],
+        ]],
+        ['partId' => '1', 'mimeType' => 'image/png', 'filename' => 'logo.png', 'body' => ['size' => 900, 'attachmentId' => 'logo-token'],
+            'headers' => [['name' => 'Content-ID', 'value' => '<logo>']]],
+    ]]];
+}
+
+function fakeStoredBodies(array $message): void
+{
+    GmailApi::fake([
+        'messages/m1/attachments/text-token' => Http::response(['size' => 11, 'data' => GmailApi::encode('Stored text')]),
+        'messages/m1/attachments/html-token' => Http::response(['size' => 26, 'data' => GmailApi::encode('<img src="cid:logo">Stored')]),
+        'messages/m1?*' => Http::response($message),
+    ]);
+}
+
+it('reads text parts Gmail stored apart from the message', function (): void {
+    fakeStoredBodies(messageWithStoredBodies());
+
+    $content = $this->provider->content($this->mailbox, 'm1');
+
+    expect($content->text)->toBe('Stored text')
+        ->and($content->html)->toBe('<img src="cid:logo">Stored');
+});
+
+it('summarises from a stored text part', function (): void {
+    fakeStoredBodies(messageWithStoredBodies());
+
+    expect($this->provider->summary($this->mailbox, 'm1', 100)->text)->toBe('Stored text');
+});
+
+it('judges embedded images against a stored html part', function (): void {
+    fakeStoredBodies(messageWithStoredBodies());
+
+    expect($this->provider->content($this->mailbox, 'm1')->attachments)->toBe([]);
+});
+
+it('fetches a stored part only when it is the body that will be read', function (): void {
+    $message = messageWithStoredBodies();
+    $message['payload']['parts'][0]['parts'][] = ['partId' => '0.2', 'mimeType' => 'text/plain', 'body' => ['size' => 5, 'attachmentId' => 'second-text-token']];
+    fakeStoredBodies($message);
+
+    $this->provider->content($this->mailbox, 'm1');
+
+    expect(GmailApi::requests('*attachments*'))->toHaveCount(2);
+});
+
+it('does not fetch a stored part when the same kind of body is inline', function (): void {
+    $message = messageWithStoredBodies();
+    array_unshift($message['payload']['parts'][0]['parts'], ['partId' => '0.3', 'mimeType' => 'text/plain', 'body' => ['size' => 6, 'data' => GmailApi::encode('Inline')]]);
+    fakeStoredBodies($message);
+
+    expect($this->provider->content($this->mailbox, 'm1')->text)->toBe('Inline')
+        ->and(GmailApi::requests('*attachments/text-token'))->toBeEmpty();
 });
 
 it('reports a message that is gone', function (Closure $call): void {
@@ -148,18 +296,63 @@ it('reports a message that is gone', function (Closure $call): void {
     'attachment' => [fn ($provider, $mailbox) => $provider->attachment($mailbox, 'gone', 'part')],
 ])->throws(MessageNotFound::class);
 
-it('does not count an image the HTML embeds by Content-ID as an attachment', function (): void {
-    $message = new GmailMessage([
-        'id' => 'm1',
-        'payload' => [
-            'mimeType' => 'multipart/related',
-            'parts' => [
-                ['mimeType' => 'text/html', 'body' => ['data' => rtrim(strtr(base64_encode('<p>Paid</p><img src="cid:logo">'), '+/', '-_'), '=')]],
-                ['mimeType' => 'image/png', 'filename' => 'logo.png', 'body' => ['attachmentId' => 'a1', 'size' => 900], 'headers' => [['name' => 'Content-ID', 'value' => '<logo>']]],
-                ['mimeType' => 'image/jpeg', 'filename' => 'invoice-photo.jpg', 'body' => ['attachmentId' => 'a2', 'size' => 90000], 'headers' => [['name' => 'Content-Disposition', 'value' => 'attachment']]],
-            ],
-        ],
-    ]);
+/**
+ * A message with this html (or plain text, when $html is null) and this image.
+ *
+ * @param  array<int, array{name: string, value: string}>  $headers
+ */
+function messageWithImage(?string $html, array $headers, int $size = 900, string $mime = 'image/png'): GmailMessage
+{
+    return new GmailMessage(['id' => 'm1', 'payload' => ['mimeType' => 'multipart/related', 'parts' => [
+        ['mimeType' => $html === null ? 'text/plain' : 'text/html', 'body' => ['data' => GmailApi::encode($html ?? 'See attached')]],
+        ['mimeType' => $mime, 'filename' => 'image.png', 'body' => ['attachmentId' => 'a1', 'size' => $size], 'headers' => $headers],
+    ]]]);
+}
 
-    expect(array_map(fn (Attachment $a): string => $a->filename, $message->attachments()))->toBe(['invoice-photo.jpg']);
+function contentId(string $id = '<logo>'): array
+{
+    return ['name' => 'Content-ID', 'value' => $id];
+}
+
+function disposition(string $value): array
+{
+    return ['name' => 'Content-Disposition', 'value' => $value];
+}
+
+it('embeds an image only when the HTML references it, it is not marked attachment, and it is small', function (GmailMessage $message): void {
+    expect($message->attachments())->toBe([]);
+})->with([
+    'no disposition' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()]),
+    'inline' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('inline; filename=image.png')]),
+    'header name in any case' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId() + ['name' => 'content-id']]),
+    'just under the limit' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()], 99_999),
+    'single quotes, upper case scheme' => fn (): GmailMessage => messageWithImage("<img src='CID:logo'>", [contentId()]),
+    'a CSS url' => fn (): GmailMessage => messageWithImage('<td style="background:url(&quot;cid:logo&quot;)">', [contentId()]),
+    'percent-encoded, as RFC 2392 writes it' => fn (): GmailMessage => messageWithImage('<img src="cid:image001.png%4001DA.ABCD">', [contentId('<image001.png@01DA.ABCD>')]),
+    'an entity in the reference' => fn (): GmailMessage => messageWithImage('<img src="cid:image001.png&#64;01DA.ABCD">', [contentId('<image001.png@01DA.ABCD>')]),
+]);
+
+it('keeps every other named image as an attachment', function (GmailMessage $message): void {
+    expect(array_map(fn (Attachment $a): string => $a->filename, $message->attachments()))->toBe(['image.png']);
+})->with([
+    'referenced but marked attachment (Outlook)' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('attachment; filename=image.png')]),
+    'marked Attachment in another case' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId(), disposition('Attachment; filename=image.png')]),
+    'inline with a plain body (Apple Mail photo)' => fn (): GmailMessage => messageWithImage(null, [contentId(), disposition('inline; filename=image.png')]),
+    'inline, html does not reference it' => fn (): GmailMessage => messageWithImage('<p>Photo attached</p>', [contentId(), disposition('inline; filename=image.png')]),
+    'another id starting the same' => fn (): GmailMessage => messageWithImage('<img src="cid:logo2">', [contentId()]),
+    'referenced but at the limit' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', [contentId()], 100_000),
+    'no Content-ID' => fn (): GmailMessage => messageWithImage('<img src="cid:logo">', []),
+]);
+
+it('never reads a non-image with a Content-ID as embedded', function (): void {
+    $message = messageWithImage('<a href="cid:logo">Invoice</a>', [contentId()], mime: 'application/pdf');
+
+    expect($message->attachments())->toHaveCount(1);
+});
+
+it('does not read a nameless inline image as an attachment', function (): void {
+    GmailApi::fake(['messages/*' => Http::response(GmailApi::fixture('message-multipart'))]);
+
+    expect(array_map(fn (Attachment $a): string => $a->filename, $this->provider->content($this->mailbox, 'm')->attachments))
+        ->toBe(['invoice-10442.pdf', 'lines.csv']);
 });
