@@ -10,6 +10,7 @@
     ],
     "require": {
         "php": "^8.2",
+        "ext-posix": "*",
         "egulias/email-validator": "^3.2|^4.0",
         "guzzlehttp/guzzle": "^7.8|^8.0",
         "illuminate/cache": "^11.0|^12.0|^13.0",

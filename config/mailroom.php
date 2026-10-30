@@ -52,7 +52,9 @@ return [
 
     /*
     | asPdf: Browsershot with puppeteer's pinned Chrome-for-Testing. Do not
-    | point chrome_path at a distro chromium (SIGTRAPs in containers).
+    | point chrome_path at a distro chromium (SIGTRAPs in containers). One
+    | message can take about 2 × (timeout + 10 s), with its retry: keep queue
+    | worker timeouts above that.
     */
     'pdf' => [
         'chrome_path' => env('MAILROOM_CHROME_PATH'),

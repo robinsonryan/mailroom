@@ -10,8 +10,9 @@ use RobinsonRyan\Mailroom\Enums\DecidedBy;
 
 /**
  * Contract A's MessageTyped. $confident is false when a gateway answer fell
- * below the type set's threshold: no type label was written and the consumer
- * decides what to do (capture asks a person).
+ * below the type set's threshold, or was repeatedly not a type in the set: no
+ * type label was written and the consumer decides what to do (capture asks a
+ * person).
  */
 final readonly class MessageTyped
 {

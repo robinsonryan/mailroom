@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Http;
 use RobinsonRyan\Mailroom\Data\Attachment;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Gmail\GmailMessage;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
@@ -356,3 +357,9 @@ it('does not read a nameless inline image as an attachment', function (): void {
     expect(array_map(fn (Attachment $a): string => $a->filename, $this->provider->content($this->mailbox, 'm')->attachments))
         ->toBe(['invoice-10442.pdf', 'lines.csv']);
 });
+
+it('calls a 4xx on one message unreadable, not a provider outage', function (): void {
+    GmailApi::fake(['messages/m1*' => Http::response(['error' => ['code' => 400, 'errors' => [['reason' => 'failedPrecondition']]]], 400)]);
+
+    GmailApi::provider()->summary(GmailApi::mailbox(), 'm1', 100);
+})->throws(MessageUnreadable::class);

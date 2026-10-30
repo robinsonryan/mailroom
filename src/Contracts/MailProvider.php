@@ -11,6 +11,7 @@ use RobinsonRyan\Mailroom\Data\OutgoingMessage;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 
 /**
@@ -43,11 +44,13 @@ interface MailProvider
 
     /**
      * @throws MessageNotFound
+     * @throws MessageUnreadable when the provider permanently refuses this one message
      */
     public function summary(Mailbox $mailbox, string $providerMessageId, int $textLimit): MessageSummary;
 
     /**
      * @throws MessageNotFound
+     * @throws MessageUnreadable when the provider permanently refuses this one message
      */
     public function content(Mailbox $mailbox, string $providerMessageId): MessageContent;
 
@@ -55,6 +58,7 @@ interface MailProvider
      * The attachment's raw bytes.
      *
      * @throws MessageNotFound
+     * @throws MessageUnreadable when the provider permanently refuses this one message
      */
     public function attachment(Mailbox $mailbox, string $providerMessageId, string $partId): string;
 

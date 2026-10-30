@@ -16,6 +16,7 @@ use RobinsonRyan\Mailroom\Data\OutgoingMessage;
 use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 
 /**
@@ -297,6 +298,10 @@ final readonly class GmailProvider implements MailProvider
     {
         if ($response->status() === 404) {
             throw new MessageNotFound("No message {$id} in {$mailbox->address}.");
+        }
+
+        if ($response->clientError()) {
+            throw new MessageUnreadable("Gmail refused message {$id} with HTTP {$response->status()}.");
         }
 
         return $this->client->json($response);

@@ -19,6 +19,7 @@ use RobinsonRyan\Mailroom\Events\MessageTyped;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Exceptions\ProviderUnavailable;
 use RobinsonRyan\Mailroom\Mailroom;
 use RobinsonRyan\Mailroom\Models\LabelWrite;
@@ -264,6 +265,27 @@ describe('ticks', function (): void {
         );
         $vanishing->shouldReceive('changeLabels')->andReturnUsing(fn ($mailbox, $id, $add, $remove) => $this->fake->changeLabels($mailbox, $id, $add, $remove));
         app(ProviderRegistry::class)->swap('gmail', $vanishing);
+
+        tick();
+
+        expect($this->mailbox->refresh()->cursor)->toBe('999')
+            ->and(Message::query()->sole()->provider_message_id)->toBe($live);
+    });
+
+    it('skips a message the provider permanently refuses, so one bad message cannot stop the mailbox', function (): void {
+        watching();
+        $live = $this->fake->deliver(INFO);
+        $provider = Mockery::mock(MailProvider::class);
+        $provider->shouldReceive('history')->andReturn(new HistoryPage([
+            new HistoryChange(ChangeKind::MessageAdded, 'bad', 't'),
+            new HistoryChange(ChangeKind::MessageAdded, $live, 't'.$live),
+        ], '999'));
+        $provider->shouldReceive('summary')->with(Mockery::any(), 'bad', Mockery::any())->andThrow(new MessageUnreadable('Refused.'));
+        $provider->shouldReceive('summary')->with(Mockery::any(), $live, Mockery::any())->andReturnUsing(
+            fn ($mailbox, $id, $limit) => $this->fake->summary($mailbox, $id, $limit),
+        );
+        $provider->shouldReceive('changeLabels')->andReturnUsing(fn ($mailbox, $id, $add, $remove) => $this->fake->changeLabels($mailbox, $id, $add, $remove));
+        app(ProviderRegistry::class)->swap('gmail', $provider);
 
         tick();
 

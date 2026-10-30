@@ -6,6 +6,7 @@ namespace RobinsonRyan\Mailroom\Watching;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Data\HistoryChange;
 use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Enums\MailboxStatus;
@@ -13,6 +14,7 @@ use RobinsonRyan\Mailroom\Events\MailboxLostAccess;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 use RobinsonRyan\Mailroom\ProviderRegistry;
 use RobinsonRyan\Mailroom\Typing\Typist;
@@ -111,6 +113,9 @@ final readonly class Watcher
         } catch (MessageNotFound) {
             // Deleted before it could be read. Nothing to do, and retrying would
             // pin the cursor here for good.
+        } catch (MessageUnreadable $e) {
+            // One bad message must not stop the mailbox.
+            Log::warning('mailroom: skipping an unreadable message', ['message' => $change->providerMessageId, 'error' => $e->getMessage()]);
         }
 
         return $askGateway;
@@ -126,6 +131,8 @@ final readonly class Watcher
                 $askGateway = $this->typist->type($mailbox, $id, $askGateway);
             } catch (MessageNotFound) {
                 continue;
+            } catch (MessageUnreadable $e) {
+                Log::warning('mailroom: skipping an unreadable message', ['message' => $id, 'error' => $e->getMessage()]);
             }
         }
 
@@ -139,8 +146,8 @@ final readonly class Watcher
                 if (! $this->typist->type($mailbox, $message->provider_message_id)) {
                     return;
                 }
-            } catch (MessageNotFound) {
-                // Deleted while it waited. Typings from other sets are worth keeping.
+            } catch (MessageNotFound|MessageUnreadable) {
+                // Gone while it waited. Typings from other sets are worth keeping.
                 if ($message->typings()->doesntExist()) {
                     $message->delete();
                 }

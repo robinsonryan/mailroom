@@ -10,6 +10,7 @@ use RobinsonRyan\Mailroom\Data\HistoryChange;
 use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Models\LabelWrite;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 use RobinsonRyan\Mailroom\Models\Message;
@@ -34,6 +35,7 @@ final readonly class LabelChanges
 
     /**
      * @throws MessageNotFound
+     * @throws MessageUnreadable
      */
     public function handle(Mailbox $mailbox, HistoryChange $change): void
     {

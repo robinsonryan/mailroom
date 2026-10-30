@@ -15,6 +15,7 @@ use RobinsonRyan\Mailroom\Data\MessageSummary;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
 use RobinsonRyan\Mailroom\Exceptions\GatewayUnavailable;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
+use RobinsonRyan\Mailroom\Exceptions\MessageUnreadable;
 use RobinsonRyan\Mailroom\Mailroom;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 use RobinsonRyan\Mailroom\Models\Message;
@@ -50,6 +51,7 @@ final readonly class Typist
      * @return bool whether the gateway is still worth asking this tick
      *
      * @throws MessageNotFound
+     * @throws MessageUnreadable
      */
     public function type(Mailbox $mailbox, string $providerMessageId, bool $askGateway = true): bool
     {
@@ -74,6 +76,7 @@ final readonly class Typist
      * The message row with its metadata, for a message Mailroom may not have seen.
      *
      * @throws MessageNotFound
+     * @throws MessageUnreadable
      */
     public function record(Mailbox $mailbox, string $providerMessageId): Message
     {
