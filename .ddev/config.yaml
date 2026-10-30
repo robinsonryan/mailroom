@@ -8,9 +8,30 @@ database:
   version: "18"
 nodejs_version: "22"
 
+# Chrome's shared libraries and a font for asPdf. Puppeteer's pinned
+# Chrome-for-Testing does the rendering, cached in .puppeteer-cache (see
+# .puppeteerrc.cjs). Debian's `chromium` crashes intermittently in containers
+# and is deliberately NOT used; these are only what that binary links against.
+webimage_extra_packages:
+  - libasound2t64
+  - libatk-bridge2.0-0t64
+  - libatk1.0-0t64
+  - libcups2t64
+  - libgbm1
+  - libgtk-3-0t64
+  - libnss3
+  - libxcomposite1
+  - libxdamage1
+  - libxkbcommon0
+  - libxrandr2
+  - fonts-liberation
+
 hooks:
   post-start:
     - exec: composer install
+    # Chrome for the `browser` test group: skipped, with the reason, without it.
+    - exec: npm install --no-package-lock --no-audit --no-fund
+    - exec: npx puppeteer browsers install chrome
     # The suite runs against real Postgres (the schema uses uuidv7() column
     # defaults, which SQLite cannot express) on a database of its own.
     - exec: psql -h db -U db -d db -tc "SELECT 1 FROM pg_database WHERE datname = 'testing'" | grep -q 1 || psql -h db -U db -d db -c "CREATE DATABASE testing"
