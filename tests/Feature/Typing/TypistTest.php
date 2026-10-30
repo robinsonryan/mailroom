@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
 use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Events\MessageTyped;
@@ -15,6 +17,9 @@ use RobinsonRyan\Mailroom\Testing\FakeProvider;
 use RobinsonRyan\Mailroom\Tests\Feature\Typing\Support\FakeGateway;
 use RobinsonRyan\Mailroom\Tests\Feature\Typing\Support\InvoiceSet;
 use RobinsonRyan\Mailroom\TypeSets\PatternRule;
+use RobinsonRyan\Mailroom\TypeSets\TypeDefinition;
+use RobinsonRyan\Mailroom\TypeSets\TypeSet;
+use RobinsonRyan\Mailroom\TypeSets\TypeSetRegistry;
 use RobinsonRyan\Mailroom\Typing\Typist;
 
 beforeEach(function (): void {
@@ -228,19 +233,87 @@ it('records the message and saves no typing when the gateway is down', function 
     Event::assertNotDispatched(MessageTyped::class);
 });
 
-it('treats a type the set does not define as a gateway failure', function (): void {
-    InvoiceSet::register();
-    Event::fake([MessageTyped::class]);
-    $this->gateway->answers('made_up', 0.99);
-    $id = $this->fake->deliver('info@example.com');
+describe('an answer the set cannot use', function (): void {
+    it('saves nothing for the first two, so the message is asked about again', function (): void {
+        InvoiceSet::register();
+        Event::fake([MessageTyped::class]);
+        $this->gateway->answers('made_up', 0.99);
+        $id = $this->fake->deliver('info@example.com');
 
-    $this->typist->type($this->mailbox, $id);
+        $stillUp = $this->typist->type($this->mailbox, $id);
+        $this->typist->type($this->mailbox, $id);
 
-    expect(Message::query()->count())->toBe(1)
-        ->and(Typing::query()->count())->toBe(0)
-        ->and($this->fake->labelsOf('info@example.com', $id))->toBe(['INBOX']);
+        expect($stillUp)->toBeTrue()
+            ->and(Message::query()->count())->toBe(1)
+            ->and(Typing::query()->count())->toBe(0)
+            ->and($this->fake->labelsOf('info@example.com', $id))->toBe(['INBOX']);
 
-    Event::assertNotDispatched(MessageTyped::class);
+        Event::assertNotDispatched(MessageTyped::class);
+    });
+
+    it('hands the message to a person on the third: not confident, unlabelled, the set\'s fallback type', function (): void {
+        InvoiceSet::register();
+        Event::fake([MessageTyped::class]);
+        $this->gateway->answers('made_up', 0.99, 'dec-7');
+        $id = $this->fake->deliver('info@example.com');
+
+        foreach (range(1, 3) as $attempt) {
+            $this->typist->type($this->mailbox, $id);
+        }
+
+        $typing = Typing::query()->sole();
+        expect($typing->type)->toBe('other')
+            ->and($typing->confident)->toBeFalse()
+            ->and($typing->confidence)->toBeNull()
+            ->and($typing->decided_by)->toBe(DecidedBy::Gateway)
+            ->and($typing->decision_id)->toBe('dec-7')
+            ->and($this->fake->labelsOf('info@example.com', $id))->toBe(['INBOX'])
+            ->and($this->typist->untyped($this->mailbox, 10))->toBeEmpty();
+
+        Event::assertDispatched(MessageTyped::class, fn (MessageTyped $e): bool => $e->type === 'other' && ! $e->confident && $e->typingId === $typing->id);
+    });
+
+    it('falls back to the last type when every type carries a label', function (): void {
+        app(TypeSetRegistry::class)->register(new TypeSet('labelled', 1, 'Labelled', 'Which?', [
+            new TypeDefinition('first', 'first', 'First'),
+            new TypeDefinition('last', 'last', 'Last'),
+        ], 0.8));
+        $this->gateway->answers('made_up', 0.99);
+        $id = $this->fake->deliver('info@example.com');
+
+        foreach (range(1, 3) as $attempt) {
+            $this->typist->type($this->mailbox, $id);
+        }
+
+        expect(Typing::query()->sole()->type)->toBe('last')
+            ->and($this->fake->labelsOf('info@example.com', $id))->toBe(['INBOX']);
+    });
+
+    it('counts each set on its own', function (): void {
+        InvoiceSet::register();
+        InvoiceSet::register(key: 'legal', prefix: 'Legal');
+        $id = $this->fake->deliver('info@example.com');
+        $this->gateway->using = fn (TypeSet $set): GatewayAnswer => new GatewayAnswer($set->key === 'legal' ? 'made_up' : 'invoice', 0.9, null);
+        $this->typist->type($this->mailbox, $id);
+        $this->typist->type($this->mailbox, $id);
+
+        $this->gateway->using = fn (): GatewayAnswer => new GatewayAnswer('made_up', 0.9, null);
+        InvoiceSet::register(key: 'tax', prefix: 'Tax');
+        $this->typist->type($this->mailbox, $id);
+
+        expect(Typing::query()->pluck('type_set')->sort()->values()->all())->toBe(['invoices', 'legal']);
+    });
+
+    it('logs it without the answer, which can echo the mail', function (): void {
+        InvoiceSet::register();
+        Log::spy();
+        $this->gateway->answers('the sender says: secret body text', 0.99);
+        $id = $this->fake->deliver('info@example.com');
+
+        $this->typist->type($this->mailbox, $id);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => ! str_contains($message.json_encode($context), 'secret'))->once();
+    });
 });
 
 it('still applies rules once the tick has stopped asking the gateway', function (): void {

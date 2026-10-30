@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace RobinsonRyan\Mailroom\Typing;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Contracts\DecisionGateway;
+use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Data\MessageSummary;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
 use RobinsonRyan\Mailroom\Events\MessageTyped;
@@ -28,6 +32,9 @@ use RobinsonRyan\Mailroom\TypeSets\TypeSetRegistry;
  */
 final readonly class Typist
 {
+    /** How many answers the set cannot use one message gets before a person is asked. */
+    private const UNUSABLE_ANSWERS = 3;
+
     public function __construct(
         private ProviderRegistry $providers,
         private TypeSetRegistry $typeSets,
@@ -122,19 +129,59 @@ final readonly class Typist
             return false;
         }
 
-        // An answer the set cannot use: the gateway is reachable, so keep asking
-        // it about other messages, but this one stays untyped.
+        $this->outage->recovered();
+
         if (! $set->type($answer->type) instanceof TypeDefinition) {
-            $this->outage->failed();
+            $this->unusableAnswer($message, $summary, $set, $answer);
 
             return true;
         }
 
-        $this->outage->recovered();
         $confident = $answer->confidence !== null && $answer->confidence >= $set->threshold;
         $this->save($message, $summary, $set, $answer->type, $answer->confidence, DecidedBy::Gateway, $confident, $answer->decisionId);
 
         return true;
+    }
+
+    /**
+     * The gateway answered, so this is no outage, but with nothing the set can
+     * use. The message stays untyped and is asked about again; once the limit is
+     * reached a not-confident typing hands it to a person and ends the asking.
+     * The count lives in the cache like the outage does: losing it costs a few
+     * more asks. The answer itself is not logged, as it can echo the mail.
+     */
+    private function unusableAnswer(Message $message, MessageSummary $summary, TypeSet $set, GatewayAnswer $answer): void
+    {
+        $key = "mailroom:typing:unusable-answers:{$message->id}:{$set->key}";
+        $attempts = (int) Cache::get($key, 0) + 1;
+
+        Log::warning('The gateway answered with a type the set does not define.', [
+            'message_id' => $message->id,
+            'type_set' => $set->key,
+            'decision_id' => $answer->decisionId,
+            'attempts' => $attempts,
+        ]);
+
+        if ($attempts < self::UNUSABLE_ANSWERS) {
+            Cache::put($key, $attempts, CarbonImmutable::now()->addDay());
+
+            return;
+        }
+
+        Cache::forget($key);
+        $this->save($message, $summary, $set, $this->fallback($set), null, DecidedBy::Gateway, false, $answer->decisionId);
+    }
+
+    /** The type that says least: the first with no label, else the last. */
+    private function fallback(TypeSet $set): string
+    {
+        foreach ($set->types as $type) {
+            if ($type->label === null) {
+                return $type->key;
+            }
+        }
+
+        return $set->types[count($set->types) - 1]->key;
     }
 
     /**

@@ -523,6 +523,44 @@ describe('retry queue', function (): void {
     });
 });
 
+describe('an answer the set cannot use', function (): void {
+    it('stops asking after three and never calls the gateway stuck', function (): void {
+        Event::fake([GatewayStuck::class]);
+        watching();
+        $this->gateway->answers('made_up', 0.9);
+        $this->fake->deliver(INFO);
+
+        foreach (range(1, 5) as $tick) {
+            tick();
+            $this->travel(10)->minutes();
+        }
+
+        $typing = Typing::query()->sole();
+        expect($this->gateway->asks)->toHaveCount(3)
+            ->and($typing->type)->toBe('other')
+            ->and($typing->confident)->toBeFalse();
+
+        Event::assertNotDispatched(GatewayStuck::class);
+    });
+
+    it('takes it as the gateway being back, ending an outage', function (): void {
+        Event::fake([GatewayStuck::class]);
+        watching();
+        $this->gateway->down = true;
+        $this->fake->deliver(INFO);
+        tick();
+        $this->gateway->down = false;
+        $this->gateway->answers('made_up', 0.9);
+        tick();
+
+        $this->travel(31)->minutes();
+        $this->gateway->down = true;
+        tick();
+
+        Event::assertNotDispatched(GatewayStuck::class);
+    });
+});
+
 describe('label changes', function (): void {
     it('recognises its own label write as an echo, not a correction', function (): void {
         watching();
