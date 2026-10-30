@@ -24,8 +24,10 @@ final readonly class GmailLabels
     ) {}
 
     /**
-     * Names for these ids. A miss re-reads the labels once; an id still unknown
-     * after that is a label deleted since, and is left out.
+     * Names for these ids. A miss re-reads the labels once. An id the re-read no
+     * longer lists keeps the name it had, for this answer only: history can
+     * describe a label deleted since, but nothing may write to it. An id never
+     * known at all has no name, and is left out.
      *
      * @param  list<string>  $ids
      * @return array<string, string> id => name
@@ -35,7 +37,7 @@ final readonly class GmailLabels
         $map = $this->cached($mailbox);
 
         if (array_diff($ids, array_keys($map)) !== []) {
-            $map = $this->refresh($mailbox);
+            $map = $this->refresh($mailbox) + $map;
         }
 
         return array_intersect_key($map, array_flip($ids));

@@ -146,6 +146,49 @@ it('refreshes the map when history names a label it has not seen', function (): 
     expect($page->changes[0]->labels)->toBe(['Invoices/Payment problem']);
 });
 
+/** One poll that warms the label map, then one naming a deleted label and a new one. */
+function fakeDeletedAndNewLabel(): void
+{
+    $entry = fn (string $id, string $label): array => ['message' => ['id' => $id, 'threadId' => 't'.$id, 'labelIds' => ['INBOX']], 'labelIds' => [$label]];
+
+    GmailApi::fake([
+        'history*' => Http::sequence()
+            ->push(GmailApi::fixture('history-page-2'))
+            ->push(['historyId' => '9', 'history' => [
+                ['id' => '7', 'labelsAdded' => [$entry('deleted', 'Label_12')]],
+                ['id' => '8', 'labelsAdded' => [$entry('created', 'Label_99')]],
+            ]]),
+        'labels' => fn (Illuminate\Http\Client\Request $request) => match (true) {
+            $request->method() === 'POST' => Http::response(['id' => 'Label_100', 'name' => $request['name']]),
+            count(GmailApi::requests(GmailApi::BASE.'labels')) === 0 => Http::response(GmailApi::fixture('labels')),
+            default => Http::response(['labels' => [['id' => 'Label_99', 'name' => 'Invoices/Payment problem']]]),
+        },
+        'messages/*/modify' => Http::response(['id' => 'm1']),
+    ]);
+}
+
+it('still names a label it knew when a new label refreshes the map in the same poll', function (): void {
+    fakeDeletedAndNewLabel();
+
+    $this->provider->history($this->mailbox, '1');
+    $page = $this->provider->history($this->mailbox, '2');
+
+    expect(array_map(fn (HistoryChange $c): array => [$c->providerMessageId, $c->labels], $page->changes))->toBe([
+        ['deleted', ['Invoices/Invoice']],
+        ['created', ['Invoices/Payment problem']],
+    ]);
+});
+
+it('does not write to a deleted label it still names for history', function (): void {
+    fakeDeletedAndNewLabel();
+
+    $this->provider->history($this->mailbox, '1');
+    $this->provider->history($this->mailbox, '2');
+    $this->provider->changeLabels($this->mailbox, 'm1', ['Invoices/Invoice'], []);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/m1/modify')[0]['addLabelIds'])->toBe(['Label_100']);
+});
+
 it('leaves out labels deleted since, refreshing once per poll', function (): void {
     GmailApi::fake(['history*' => Http::response(GmailApi::fixture('history-deleted-label'))]);
 
