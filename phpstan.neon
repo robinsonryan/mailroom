@@ -1,0 +1,13 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - src
+        # Fixture consumer models are often the only classes using the package's
+        # traits; without them PHPStan reports trait.unused.
+        - tests/Fixtures
+    level: 8
+    phpVersion: 80200
+    tmpDir: .phpstan.cache
+    ignoreErrors: []

@@ -1,0 +1,4 @@
+# Yikes work-tracking opt-in (non-secret; committed).
+project: mailroom
+hub: http://192.168.0.25
+vault_entry: harness/yikes/mailroom-agent-local

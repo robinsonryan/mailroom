@@ -1,0 +1,6 @@
+schema: 1
+project: mailroom
+profile: laravel-package
+# add: []          # extra layers
+# remove: []       # layers dropped from the profile
+# versions: {}     # pins that override detection, e.g. {php: "8.4"}

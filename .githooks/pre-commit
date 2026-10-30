@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+#
+# laravel-package pre-commit gate
+#
+# CANONICAL SOURCE: $CLAUDE_HARNESS_DIR/core/stacks/laravel-package/hooks/pre-commit
+# Every package carries a COMMITTED COPY at .githooks/pre-commit, because
+# core.hooksPath is resolved relative to the working tree — a fresh clone has to
+# find the file in the checkout. Do not edit a package's copy: edit the canonical
+# one and re-run hooks/install.sh. `harness package-check` reports copies that
+# have drifted from the canonical hash.
+#
+# WHAT IT RUNS — the WHOLE gate, tests included:
+#   PHP side : composer quality  (= lint:check -> analyze -> refactor:check -> test)
+#   JS  side : npm run quality   (lint:check -> typecheck -> vitest [-> build])
+#             ...only for the packages that have a frontend half.
+# The apps exclude their test suite because ~2,100 Pest tests serial is eight
+# minutes and a gate that slow is one everyone learns to drive around. Packages
+# are 4-45 test files; hey-you's full suite is 24 seconds. That compromise does
+# not apply here, so nothing is held back.
+#
+# Each side is skipped when no staged file touches it, so a README or QUEUE.md
+# commit is near-instant.
+#
+# ONE DEFINITION OF GREEN: the hook calls `composer quality` rather than
+# re-listing pint/phpstan/rector/pest. composer.json owns what the gate is; this
+# script only decides when to run it. A hook with its own copy of the step list
+# is a second definition that silently diverges.
+#
+# VERIFY-ONLY, WITH ONE HONEST EXCEPTION: every step is a checking variant
+# (`pint --test`, `rector --dry-run`), so the hook does not rewrite your source
+# and never stages anything. The exception is a package whose frontend gate ends
+# in a build — yikes commits its island bundle — where running the gate rewrites
+# a tracked artifact. That cannot be waved away, so the hook detects it and
+# refuses the commit rather than letting a stale bundle ship. See the
+# shipped-artifact check at the end.
+#
+# WHERE IT RUNS:
+#   On the HOST; every check is dispatched into the package's DDEV web container
+#   via `ddev exec --dir <container path>`. Works from the main checkout and from
+#   any worktree nested inside it. DDEV not running == FAIL; the gate never
+#   silently passes.
+#
+# SKIP POLICY:
+#   `PACKAGE_SKIP_GATE=1 git commit` bypasses loudly and leaves a line in the log.
+#   That valve is for Ryan (human) in an emergency ONLY. Agents must never set it,
+#   and `--no-verify` is forbidden outright. Run `ddev composer quality` before
+#   pushing a skip.
+#
+# KNOWN CAVEAT (accepted, do not "fix"):
+#   The checks read the WORKING TREE, not the index. A partially-staged file is
+#   checked in its working-tree state. `git stash --keep-index` gymnastics inside
+#   a hook is a well-known data-loss foot-gun; we commit whole files here.
+#
+set -uo pipefail
+
+# ---------------------------------------------------------------- skip hatch ---
+# Per checkout, so a worktree logs to .git/worktrees/<name>/pre-commit.log. Never
+# committed (it lives inside the git dir). Truncated per run, except that a skip
+# appends, so the trace survives next to whatever last ran.
+LOG="$(git rev-parse --absolute-git-dir)/pre-commit.log"
+if [ "${PACKAGE_SKIP_GATE:-}" = "1" ]; then
+    echo "!! GATE SKIPPED via PACKAGE_SKIP_GATE — run 'ddev composer quality' before push"
+    echo "[$(date -Is)] GATE SKIPPED via PACKAGE_SKIP_GATE" >> "$LOG"
+    exit 0
+fi
+
+# ------------------------------------------------------- checkout resolution ---
+TOPLEVEL="$(git rev-parse --show-toplevel)"
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+
+if [ "$TOPLEVEL" = "$MAIN" ]; then
+    CDIR="/var/www/html"
+elif [ "${TOPLEVEL#"$MAIN"/}" != "$TOPLEVEL" ]; then
+    CDIR="/var/www/html/${TOPLEVEL#"$MAIN"/}"
+else
+    echo "pre-commit: FAIL — this working tree ($TOPLEVEL) is not inside the DDEV"
+    echo "            project root ($MAIN), so its files are not mounted in the"
+    echo "            container. Nest the worktree inside the package and retry."
+    exit 1
+fi
+
+# Dispatch a command into the container, in the right checkout directory.
+ddev_exec() {
+    (cd "$MAIN" && ddev exec --dir "$CDIR" "$@")
+}
+
+# ---------------------------------------------------------- ddev availability ---
+# Unconditional, even for a docs-only commit: "no DDEV, no commit" is one rule
+# with no edge cases, and it is what keeps a stopped container from ever reading
+# as green.
+#
+# Two traps, both verified by hand on ddev v1.25.2, both easy to get wrong:
+#   - `ddev describe -j` exits 0 for a STOPPED project (it reports the stop in the
+#     payload). Testing its exit code alone is a false green. Match the payload.
+#   - `ddev exec` silently AUTO-STARTS a stopped project, so it can never detect
+#     one — it would instead stall the commit ~60 s booting containers.
+if ! command -v ddev >/dev/null 2>&1; then
+    echo "pre-commit: FAIL — 'ddev' not found on PATH. The quality gate runs inside DDEV."
+    exit 1
+fi
+# Captured, not piped: `grep -q` can SIGPIPE the producer, and with pipefail that
+# would read as a failure even on a healthy project.
+DDEV_DESC="$( (cd "$MAIN" && ddev describe -j) 2>/dev/null )"
+case "$DDEV_DESC" in
+    *'"status_desc":"running"'*) ;;
+    *)
+        echo "pre-commit: FAIL — the DDEV project is not running (or not healthy), so"
+        echo "            the quality gate cannot run. Start it with 'ddev start',"
+        echo "            check 'ddev describe', then retry the commit."
+        exit 1
+        ;;
+esac
+
+# ------------------------------------------------ staged-file classification ---
+PHP_CHANGED=0
+JS_CHANGED=0
+while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+        *.php|composer.json|composer.lock|phpstan.neon|phpstan.neon.dist|pint.json|rector.php|phpunit.xml|phpunit.xml.dist)
+            PHP_CHANGED=1 ;;
+    esac
+    case "$f" in
+        *.ts|*.tsx|*.vue|*.js|*.mjs|*.cjs|*.css) JS_CHANGED=1 ;;
+        package.json|package-lock.json|pnpm-lock.yaml) JS_CHANGED=1 ;;
+        vite.config.*|vitest.config.*|tsconfig*.json|eslint.config.*) JS_CHANGED=1 ;;
+    esac
+done < <(git diff --cached --name-only -z)
+
+# Six of the seven packages are PHP-only. A stray .css in one of those must not
+# summon an npm gate that cannot exist — require both the manifest and a quality
+# script in it.
+HAS_FRONTEND=0
+if [ -f "$TOPLEVEL/package.json" ] && grep -q '"quality"' "$TOPLEVEL/package.json"; then
+    HAS_FRONTEND=1
+fi
+
+# ------------------------------------------------------------------- logging ---
+: > "$LOG"
+{
+    echo "package pre-commit gate"
+    echo "started : $(date -Is)"
+    echo "tree    : $TOPLEVEL"
+    echo "container dir: $CDIR"
+    echo "php side: $PHP_CHANGED   js side: $JS_CHANGED   has frontend: $HAS_FRONTEND"
+    echo
+} >> "$LOG"
+
+TOTAL_START=$SECONDS
+
+# run_step <label> <command...>
+# Full output -> $LOG. One "ok" line per step on stdout. On failure: name the step,
+# show the tail of the log, and exit with the step's REAL exit code (never 0).
+run_step() {
+    local label="$1"; shift
+    local start=$SECONDS rc=0
+    printf '  %-16s ... ' "$label"
+    {
+        echo "===== $label ====="
+        echo "\$ $*"
+    } >> "$LOG"
+    "$@" >> "$LOG" 2>&1
+    rc=$?
+    echo >> "$LOG"
+    if [ "$rc" -eq 0 ]; then
+        printf 'ok (%ss)\n' "$((SECONDS - start))"
+        return 0
+    fi
+    printf 'FAILED (exit %s)\n' "$rc"
+    echo
+    echo "pre-commit: $label failed — commit aborted."
+    echo "---- last 40 log lines ----"
+    tail -n 40 "$LOG"
+    echo "---------------------------"
+    echo "full log: $LOG"
+    echo "the gate is verify-only; fix with 'ddev composer lint' / 'ddev composer refactor'"
+    echo "and re-stage. Never bypass with --no-verify."
+    echo "total: $((SECONDS - TOTAL_START))s"
+    exit "$rc"
+}
+
+echo "package pre-commit gate -> $CDIR"
+
+# ------------------------------------------------------ pre-gate tree state ---
+# Snapshot TRACKED files only, so the comparison at the end measures what the
+# GATE changed rather than what you already had in progress. See the staleness
+# check below for why this exists.
+#
+# --untracked-files=no is deliberate: PHPStan and Pest drop cache directories
+# mid-run, and an untracked cache is not a staleness risk. A rebuilt artifact
+# always shows up as a tracked modification (or, for content-hashed filenames,
+# as the tracked DELETION of the old chunk), so the real hazard is still caught.
+TREE_BEFORE="$(git status --porcelain --untracked-files=no)"
+
+if [ "$PHP_CHANGED" -eq 1 ]; then
+    run_step "composer quality" ddev_exec composer quality
+else
+    echo "  PHP side         ... skipped (nothing staged that PHP tooling reads)"
+fi
+
+if [ "$JS_CHANGED" -eq 1 ] && [ "$HAS_FRONTEND" -eq 1 ]; then
+    run_step "npm quality"      ddev_exec npm run quality
+elif [ "$JS_CHANGED" -eq 1 ]; then
+    echo "  frontend         ... skipped (this package has no frontend gate)"
+else
+    echo "  frontend         ... skipped (nothing staged that frontend tooling reads)"
+fi
+
+# --------------------------------------------------- shipped-artifact check ---
+# A package that COMMITS a build artifact has a failure mode the rest of the gate
+# cannot see. yikes ships its prebuilt island bundle in a tracked `dist/`, and its
+# `npm run quality` ends in `vite build` — so running the gate rewrites `dist/`.
+# The hook reads the working tree and never stages anything (deliberately), which
+# means a rebuild it triggers lands OUTSIDE the commit: every check passes, the
+# commit succeeds, and the bundle that ships is the stale one. Silent, and exactly
+# the kind of thing you discover in production.
+#
+# So: if the gate changed a tracked file, stop and say which. This is the one
+# place the hook is not purely verify-only, and rather than pretend otherwise it
+# refuses to let the discrepancy through. In the normal case it is silent — the
+# build is deterministic, and three full sweeps of every package left the tree
+# untouched, so this only fires when the committed artifact genuinely disagrees
+# with its source.
+TREE_AFTER="$(git status --porcelain --untracked-files=no)"
+if [ "$TREE_BEFORE" != "$TREE_AFTER" ]; then
+    echo
+    echo "pre-commit: the gate CHANGED tracked files — commit aborted."
+    echo
+    echo "  Almost certainly a committed build artifact that no longer matches its"
+    echo "  source: the gate rebuilt it, and the rebuild is not in your commit."
+    echo "  Review and stage it alongside the source that produced it, then retry."
+    echo
+    echo "  changed by the gate:"
+    diff <(printf '%s\n' "$TREE_BEFORE") <(printf '%s\n' "$TREE_AFTER") \
+        | sed -n 's/^> /    /p'
+    echo
+    echo "full log: $LOG"
+    echo "total: $((SECONDS - TOTAL_START))s"
+    exit 1
+fi
+
+echo "package pre-commit gate passed in $((SECONDS - TOTAL_START))s"
+exit 0

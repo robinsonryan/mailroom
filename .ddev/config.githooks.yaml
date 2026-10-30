@@ -1,0 +1,11 @@
+# Managed by $CLAUDE_HARNESS_DIR/core/stacks/laravel-package/hooks/install.sh
+#
+# Wires the per-package commit gate. `core.hooksPath` is RELATIVE on purpose: it
+# resolves against whichever working tree the commit happens in, so a nested
+# worktree runs its own checked-out copy of the hook rather than the main one.
+#
+# exec-host, not exec: git config has to be set on the host checkout, and the
+# container has no .git to write to.
+hooks:
+  post-start:
+    - exec-host: git config core.hooksPath .githooks
