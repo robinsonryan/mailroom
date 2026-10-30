@@ -88,18 +88,27 @@ it('asks the gateway when no rule matches, with the address in the ref and the s
         ->and($this->gateway->asks[0]['ref'])->toBe("mail:info@example.com:{$id}")
         ->and($this->gateway->asks[0]['type_set'])->toBe('invoices')
         ->and($this->gateway->asks[0]['state'])->toBe(
-            "From: V <a@v.com>\nSubject: Bill\nDate: ".$at->toRfc2822String()."\nPDF attachments: inv.PDF, more.pdf\n\nBody:\nPay me",
+            "From: V <a@v.com>\nSubject: Bill\nDate: ".$at->toRfc2822String()."\nAttachments: inv.PDF, logo.png, more.pdf\n\nBody:\nPay me",
         );
 });
 
-it('says none when there are no PDF attachments and cuts the text to the limit', function (): void {
-    config(['mailroom.typing.text_limit' => 4]);
+it('names an image attachment, which is fileable too', function (): void {
     InvoiceSet::register();
-    $id = $this->fake->deliver('info@example.com', text: 'abcdefgh', attachments: [['name' => 'a.png', 'mime' => 'image/png', 'bytes' => 'x']]);
+    $id = $this->fake->deliver('info@example.com', attachments: [['name' => 'invoice-2026-10.jpg', 'mime' => 'image/jpeg', 'bytes' => 'x']]);
 
     $this->typist->type($this->mailbox, $id);
 
-    expect($this->gateway->asks[0]['state'])->toContain("PDF attachments: none\n\nBody:\nabcd")
+    expect($this->gateway->asks[0]['state'])->toContain("Attachments: invoice-2026-10.jpg\n");
+});
+
+it('says none when there are no attachments and cuts the text to the limit', function (): void {
+    config(['mailroom.typing.text_limit' => 4]);
+    InvoiceSet::register();
+    $id = $this->fake->deliver('info@example.com', text: 'abcdefgh');
+
+    $this->typist->type($this->mailbox, $id);
+
+    expect($this->gateway->asks[0]['state'])->toContain("Attachments: none\n\nBody:\nabcd")
         ->and($this->gateway->asks[0]['state'])->not->toContain('abcde');
 });
 

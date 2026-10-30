@@ -258,12 +258,12 @@ final readonly class Typist
 
     private function state(MessageSummary $summary): string
     {
-        $pdfs = array_filter($summary->attachmentNames, fn (string $name): bool => str_ends_with(strtolower($name), '.pdf'));
+        $attachments = $summary->attachmentNames === [] ? 'none' : implode(', ', $summary->attachmentNames);
 
         return "From: {$summary->from}\n"
             ."Subject: {$summary->subject}\n"
             ."Date: {$summary->receivedAt->toRfc2822String()}\n"
-            .'PDF attachments: '.($pdfs === [] ? 'none' : implode(', ', $pdfs))."\n\n"
+            ."Attachments: {$attachments}\n\n"
             ."Body:\n{$summary->text}";
     }
 }
