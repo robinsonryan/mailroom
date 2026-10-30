@@ -1,0 +1,105 @@
+{
+  "history": [
+    {
+      "id": "8842201",
+      "messages": [
+        {
+          "id": "aaa1",
+          "threadId": "taaa"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "aaa1",
+            "threadId": "taaa",
+            "labelIds": [
+              "UNREAD",
+              "INBOX"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "8842204",
+      "messages": [
+        {
+          "id": "bbb2",
+          "threadId": "tbbb"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "bbb2",
+            "threadId": "tbbb",
+            "labelIds": [
+              "UNREAD",
+              "INBOX"
+            ]
+          }
+        }
+      ],
+      "labelsAdded": [
+        {
+          "message": {
+            "id": "bbb2",
+            "threadId": "tbbb",
+            "labelIds": [
+              "UNREAD",
+              "INBOX",
+              "Label_12"
+            ]
+          },
+          "labelIds": [
+            "Label_12"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "8842206",
+      "messages": [
+        {
+          "id": "ccc3",
+          "threadId": "tccc"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "ccc3",
+            "threadId": "tccc",
+            "labelIds": [
+              "DRAFT"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "8842207",
+      "messages": [
+        {
+          "id": "ddd4",
+          "threadId": "tddd"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "ddd4",
+            "threadId": "tddd",
+            "labelIds": [
+              "UNREAD",
+              "SPAM"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "nextPageToken": "09483726150",
+  "historyId": "8842210"
+}

@@ -1,0 +1,52 @@
+{
+  "history": [
+    {
+      "id": "8842401",
+      "messages": [
+        {
+          "id": "ggg7",
+          "threadId": "tggg"
+        }
+      ],
+      "labelsRemoved": [
+        {
+          "message": {
+            "id": "ggg7",
+            "threadId": "tggg",
+            "labelIds": [
+              "INBOX"
+            ]
+          },
+          "labelIds": [
+            "Label_404"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "8842402",
+      "messages": [
+        {
+          "id": "hhh8",
+          "threadId": "thhh"
+        }
+      ],
+      "labelsRemoved": [
+        {
+          "message": {
+            "id": "hhh8",
+            "threadId": "thhh",
+            "labelIds": [
+              "INBOX"
+            ]
+          },
+          "labelIds": [
+            "Label_404",
+            "Label_12"
+          ]
+        }
+      ]
+    }
+  ],
+  "historyId": "8842403"
+}

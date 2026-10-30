@@ -1,0 +1,124 @@
+{
+  "id": "19a2f0c1d2e3f408",
+  "threadId": "19a2f0c1d2e3f408",
+  "labelIds": [
+    "INBOX"
+  ],
+  "snippet": "Forwarding this.",
+  "sizeEstimate": 90211,
+  "historyId": "8842250",
+  "internalDate": "1793042042000",
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/mixed",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "To",
+        "value": "info@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Fwd: Invoice"
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "message/rfc822",
+        "filename": "original.eml",
+        "headers": [
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"original.eml\""
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ_original_eml",
+          "size": 88100
+        },
+        "parts": [
+          {
+            "partId": "0.0",
+            "mimeType": "text/plain",
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain; charset=\"UTF-8\""
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "quoted-printable"
+              }
+            ],
+            "body": {
+              "size": 32,
+              "data": "SW5uZXIgdGV4dCBvZiB0aGUgZm9yd2FyZGVkIG1haWw"
+            }
+          },
+          {
+            "partId": "0.1",
+            "mimeType": "application/pdf",
+            "filename": "inner.pdf",
+            "headers": [
+              {
+                "name": "Content-Disposition",
+                "value": "attachment; filename=\"inner.pdf\""
+              }
+            ],
+            "body": {
+              "attachmentId": "ANGjdJ_inner_pdf",
+              "size": 80000
+            }
+          }
+        ]
+      },
+      {
+        "partId": "1",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/plain; name=\"notes.txt\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"notes.txt\""
+          }
+        ],
+        "body": {
+          "size": 27,
+          "data": "QXR0YWNoZWQgbm90ZSwgbm90IHRoZSBib2R5"
+        }
+      },
+      {
+        "partId": "2",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=\"UTF-8\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          }
+        ],
+        "body": {
+          "size": 16,
+          "data": "Rm9yd2FyZGluZyB0aGlzLg"
+        }
+      }
+    ]
+  }
+}

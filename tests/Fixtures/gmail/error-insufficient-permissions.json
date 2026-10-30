@@ -1,0 +1,14 @@
+{
+  "error": {
+    "code": 403,
+    "message": "Insufficient Permission",
+    "errors": [
+      {
+        "message": "Insufficient Permission",
+        "domain": "usageLimits",
+        "reason": "insufficientPermissions"
+      }
+    ],
+    "status": "PERMISSION_DENIED"
+  }
+}
