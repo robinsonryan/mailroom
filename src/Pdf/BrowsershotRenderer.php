@@ -17,6 +17,7 @@ use Throwable;
  * unresolvable http origin rather than Browsershot's temporary file: on a
  * file:// page a mail's `<img src="/etc/...">` resolves to the local disk. That
  * origin also makes Chrome refuse private addresses, keeping mail off the LAN.
+ * MailBrowsershot makes the timeout stop everything the render started.
  */
 final readonly class BrowsershotRenderer implements PdfRenderer
 {
@@ -45,18 +46,23 @@ final readonly class BrowsershotRenderer implements PdfRenderer
     {
         $seconds = max(1, (int) $this->config->get('mailroom.pdf.timeout', 60));
 
-        // timeout() gives PHP's kill and Chrome's navigation limit the same
-        // value, so PHP always wins and strands node and Chrome. Navigation
-        // gets two thirds: a hung image then fails inside node, which closes
-        // the browser itself.
-        $browsershot = Browsershot::html($html)
+        // The timeout is the whole budget, and past it everything is killed.
+        // Start-up, navigation, printing and closing the browser get a quarter
+        // each, so a hung image or a slow print fails inside node, which says
+        // why, and leaves the kill for what hangs node itself. The protocol
+        // limit is both the print's and the close's.
+        $share = intdiv($seconds * 1000, 4);
+
+        $browsershot = MailBrowsershot::html($html)
             ->setContentUrl(self::PAGE_URL)
             ->disableJavascript()
             ->format('Letter')
             ->showBackground()
             ->margins(12.7, 12.7, 12.7, 12.7)
+            ->usePipe()
             ->timeout($seconds)
-            ->setOption('timeout', intdiv($seconds * 2000, 3));
+            ->setOption('timeout', $share)
+            ->setOption('protocolTimeout', $share);
 
         $this->applyPaths($browsershot);
 
