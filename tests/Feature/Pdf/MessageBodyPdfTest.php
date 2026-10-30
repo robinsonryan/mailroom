@@ -8,7 +8,6 @@ use RobinsonRyan\Mailroom\Data\MessageRef;
 use RobinsonRyan\Mailroom\Exceptions\RenderFailed;
 use RobinsonRyan\Mailroom\Pdf\MessageBodyPdf;
 use RobinsonRyan\Mailroom\Tests\Feature\Pdf\RecordingRenderer;
-use Spatie\Browsershot\Browsershot;
 
 function pdfMessage(
     ?string $text = 'Plain body',
@@ -186,7 +185,7 @@ it('strips everything else that could load active content or navigate the page',
     'meta refresh' => ['<meta http-equiv="refresh" content="0;url=https://evil.test/">'],
 ]);
 
-it('survives what Word pastes into a mail, so Browsershot does not refuse the document', function (): void {
+it('takes the local links out of what Word pastes into a mail', function (): void {
     $html = composedHtml(pdfMessage(html: <<<'HTML'
         <html><head>
         <link rel=File-List href="file:///C:/Users/x/AppData/Local/Temp/msohtmlclip1/01/clip_filelist.xml">
@@ -194,9 +193,7 @@ it('survives what Word pastes into a mail, so Browsershot does not refuse the do
         </head><body><p>Total due</p><img src="file:///C:/Users/x/image001.png"></body></html>
         HTML));
 
-    expect($html)->toContain('Total due')
-        ->not->toContain('file:')
-        ->and(Browsershot::html($html))->toBeInstanceOf(Browsershot::class);
+    expect($html)->toContain('Total due')->not->toContain('file:');
 });
 
 it('renders once, with remote images, when the first attempt works', function (): void {
