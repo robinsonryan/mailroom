@@ -13,7 +13,6 @@ use RobinsonRyan\Mailroom\Contracts\DecisionGateway;
 use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Data\MessageSummary;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
-use RobinsonRyan\Mailroom\Events\MessageTyped;
 use RobinsonRyan\Mailroom\Exceptions\GatewayUnavailable;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
 use RobinsonRyan\Mailroom\Mailroom;
@@ -41,6 +40,7 @@ final readonly class Typist
         private DecisionGateway $gateway,
         private GatewayOutage $outage,
         private Mailroom $mailroom,
+        private TypingAnnouncer $announcer,
     ) {}
 
     /**
@@ -186,7 +186,9 @@ final readonly class Typist
 
     /**
      * The label goes first: if it fails nothing is recorded, so the message is
-     * typed again rather than left typed with no label and no event.
+     * typed again rather than left typed with no label and no event. A tick
+     * that overlaps this one may get its typing in first; it has told the
+     * consumers, so this one stays quiet.
      */
     private function save(Message $message, MessageSummary $summary, TypeSet $set, string $type, ?float $confidence, DecidedBy $decidedBy, bool $confident, ?string $decisionId): void
     {
@@ -197,18 +199,21 @@ final readonly class Typist
             $this->mailroom->changeLabels($message->ref(), [$label], []);
         }
 
-        $typing = Typing::query()->create([
-            'message_id' => $message->id,
-            'type_set' => $set->key,
-            'type_set_version' => $set->version,
-            'type' => $type,
-            'confidence' => $confidence,
-            'decided_by' => $decidedBy,
-            'confident' => $confident,
-            'decision_id' => $decisionId,
-        ]);
+        $typing = Typing::query()->createOrFirst(
+            ['message_id' => $message->id, 'type_set' => $set->key, 'superseded_by_id' => null],
+            [
+                'type_set_version' => $set->version,
+                'type' => $type,
+                'confidence' => $confidence,
+                'decided_by' => $decidedBy,
+                'confident' => $confident,
+                'decision_id' => $decisionId,
+            ],
+        );
 
-        MessageTyped::dispatch($message->ref(), $set->key, $type, $confidence, $decidedBy, $confident, $typing->id);
+        if ($typing->wasRecentlyCreated) {
+            $this->announcer->announce($typing);
+        }
     }
 
     private function find(Mailbox $mailbox, string $providerMessageId): ?Message

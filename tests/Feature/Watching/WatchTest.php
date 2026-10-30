@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Contracts\MailProvider;
 use RobinsonRyan\Mailroom\Data\GatewayAnswer;
 use RobinsonRyan\Mailroom\Data\HistoryChange;
@@ -104,14 +105,14 @@ describe('ticks', function (): void {
         $cursor = $this->mailbox->cursor;
         $first = $this->fake->deliver(INFO);
         $second = $this->fake->deliver(INFO);
-        $blow = true;
-        Event::listen(MessageTyped::class, function () use (&$blow): void {
-            if ($blow) {
-                $blow = false;
-
-                throw new RuntimeException('listener failed');
+        $asks = 0;
+        $this->gateway->using = function () use (&$asks): GatewayAnswer {
+            if (++$asks === 2) {
+                throw new RuntimeException('Something unforeseen.');
             }
-        });
+
+            return new GatewayAnswer('invoice', 0.95, null);
+        };
 
         $this->artisan('mailroom:watch')->assertFailed();
 
@@ -123,6 +124,38 @@ describe('ticks', function (): void {
         expect($this->mailbox->refresh()->cursor)->not->toBe($cursor)
             ->and(Typing::query()->count())->toBe(2)
             ->and(Message::query()->pluck('provider_message_id')->sort()->values()->all())->toBe([$first, $second]);
+    });
+
+    it('carries on past a listener that throws, logs the typing, and can fire it again', function (): void {
+        watching();
+        $cursor = $this->mailbox->cursor;
+        $first = $this->fake->deliver(INFO);
+        $second = $this->fake->deliver(INFO);
+        $heard = [];
+        $blow = true;
+        Event::listen(MessageTyped::class, function (MessageTyped $event) use (&$blow, &$heard): void {
+            if ($blow) {
+                $blow = false;
+
+                throw new RuntimeException('listener failed');
+            }
+
+            $heard[] = $event->ref->providerMessageId;
+        });
+        Log::spy();
+
+        $this->artisan('mailroom:watch')->assertSuccessful();
+
+        $missed = Message::query()->where('provider_message_id', $first)->sole()->currentTyping('invoices');
+        expect($this->mailbox->refresh()->cursor)->not->toBe($cursor)
+            ->and(Typing::query()->count())->toBe(2)
+            ->and($heard)->toBe([$second]);
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['typing_id'] === $missed?->id)->once();
+
+        $this->artisan('mailroom:announce', ['typing' => $missed?->id])->assertSuccessful();
+
+        expect($heard)->toBe([$second, $first]);
     });
 
     it('watches only active mailboxes', function (): void {

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use RobinsonRyan\Mailroom\Data\GatewayAnswer;
@@ -363,4 +364,55 @@ it('does not count a superseded typing as missing', function (): void {
     $this->mailroom->correct($this->fake->ref($this->mailbox, $id), 'invoices', 'bill_ready');
 
     expect($this->typist->untyped($this->mailbox, 10))->toBeEmpty();
+});
+
+it('keeps the first typing and fires nothing when another tick typed the message first', function (): void {
+    InvoiceSet::register();
+    Event::fake([MessageTyped::class]);
+    $id = $this->fake->deliver('info@example.com');
+    $this->gateway->using = function (): GatewayAnswer {
+        // The overlapping tick saves its typing while this one waits on the gateway.
+        Typing::query()->create([
+            'message_id' => Message::query()->sole()->id, 'type_set' => 'invoices', 'type_set_version' => 3,
+            'type' => 'invoice', 'decided_by' => DecidedBy::Gateway, 'confident' => true,
+        ]);
+
+        return new GatewayAnswer('bill_ready', 0.9, null);
+    };
+
+    $this->typist->type($this->mailbox, $id);
+
+    expect(Typing::query()->sole()->type)->toBe('invoice');
+
+    Event::assertNotDispatched(MessageTyped::class);
+});
+
+it('refuses a second current typing for one message and set', function (): void {
+    InvoiceSet::register();
+    $id = $this->fake->deliver('info@example.com');
+    $this->typist->type($this->mailbox, $id);
+
+    Typing::query()->create([
+        'message_id' => Message::query()->sole()->id, 'type_set' => 'invoices', 'type_set_version' => 3,
+        'type' => 'bill_ready', 'decided_by' => DecidedBy::Gateway, 'confident' => true,
+    ]);
+})->throws(UniqueConstraintViolationException::class);
+
+it('keeps a typing and carries on when a listener throws', function (): void {
+    InvoiceSet::register();
+    InvoiceSet::register(key: 'legal', prefix: 'Legal');
+    Event::listen(MessageTyped::class, function (): never {
+        throw new RuntimeException('listener failed');
+    });
+    Log::spy();
+    $id = $this->fake->deliver('info@example.com');
+
+    $this->typist->type($this->mailbox, $id);
+
+    $typings = Typing::query()->pluck('id')->sort()->values()->all();
+    expect($typings)->toHaveCount(2);
+
+    foreach ($typings as $typing) {
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['typing_id'] === $typing)->once();
+    }
 });
