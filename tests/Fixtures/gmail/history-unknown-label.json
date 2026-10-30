@@ -1,0 +1,29 @@
+{
+  "history": [
+    {
+      "id": "8842301",
+      "messages": [
+        {
+          "id": "fff6",
+          "threadId": "tfff"
+        }
+      ],
+      "labelsAdded": [
+        {
+          "message": {
+            "id": "fff6",
+            "threadId": "tfff",
+            "labelIds": [
+              "INBOX",
+              "Label_99"
+            ]
+          },
+          "labelIds": [
+            "Label_99"
+          ]
+        }
+      ]
+    }
+  ],
+  "historyId": "8842302"
+}

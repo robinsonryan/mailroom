@@ -1,0 +1,205 @@
+{
+  "id": "19a2f0c1d2e3f405",
+  "threadId": "19a2f0c1d2e3f400",
+  "labelIds": [
+    "INBOX",
+    "UNREAD",
+    "Label_12",
+    "CATEGORY_UPDATES"
+  ],
+  "snippet": "Hello, Invoice 10442 for $1,284.50 is attached.",
+  "sizeEstimate": 248113,
+  "historyId": "8842210",
+  "internalDate": "1793031242000",
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/mixed",
+    "filename": "",
+    "headers": [
+      {
+        "name": "Delivered-To",
+        "value": "info@example.com"
+      },
+      {
+        "name": "Received",
+        "value": "by 2002:a05:7300:1234:b0:1a2:3b4c:5d6e with SMTP id x1csp1; Mon, 26 Oct 2026 09:14:02 -0700 (PDT)"
+      },
+      {
+        "name": "Received",
+        "value": "from mail.acme-parts.example by mx.google.example with ESMTPS id x2si1; Mon, 26 Oct 2026 09:14:01 -0700 (PDT)"
+      },
+      {
+        "name": "From",
+        "value": "Acme Parts Billing <billing@acme-parts.example>"
+      },
+      {
+        "name": "To",
+        "value": "Info <info@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Invoice 10442 — due 2026-11-25"
+      },
+      {
+        "name": "Date",
+        "value": "Mon, 26 Oct 2026 16:14:00 +0000"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<inv-10442@acme-parts.example>"
+      },
+      {
+        "name": "MIME-Version",
+        "value": "1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/mixed; boundary=\"000000000000a1b2c3\""
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "multipart/related",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "multipart/related; boundary=\"000000000000a1b2c4\""
+          }
+        ],
+        "body": {
+          "size": 0
+        },
+        "parts": [
+          {
+            "partId": "0.0",
+            "mimeType": "multipart/alternative",
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "multipart/alternative; boundary=\"000000000000a1b2c5\""
+              }
+            ],
+            "body": {
+              "size": 0
+            },
+            "parts": [
+              {
+                "partId": "0.0.0",
+                "mimeType": "text/plain",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/plain; charset=\"UTF-8\""
+                  },
+                  {
+                    "name": "Content-Transfer-Encoding",
+                    "value": "quoted-printable"
+                  }
+                ],
+                "body": {
+                  "size": 106,
+                  "data": "SGVsbG8sDQoNCkludm9pY2UgMTA0NDIgZm9yICQxLDI4NC41MCBpcyBhdHRhY2hlZC4NClBheW1lbnQgaXMgZHVlIDIwMjYtMTEtMjUuDQoNCuKAlCBBY21lIFBhcnRzIEJpbGxpbmcNCg"
+                }
+              },
+              {
+                "partId": "0.0.1",
+                "mimeType": "text/html",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/html; charset=\"UTF-8\""
+                  },
+                  {
+                    "name": "Content-Transfer-Encoding",
+                    "value": "quoted-printable"
+                  }
+                ],
+                "body": {
+                  "size": 196,
+                  "data": "PCFkb2N0eXBlIGh0bWw-PGh0bWw-PGhlYWQ-PHRpdGxlPkludm9pY2U8L3RpdGxlPjxzdHlsZT5wIHsgY29sb3I6ICMzMzM7IH08L3N0eWxlPjwvaGVhZD48Ym9keT48cD5IZWxsbyw8L3A-PHA-SW52b2ljZSAxMDQ0MiBmb3IgPGI-JDEsMjg0LjUwPC9iPiBpcyBhdHRhY2hlZC48L3A-PGltZyBzcmM9ImNpZDpsb2dvIj48L2JvZHk-PC9odG1sPg"
+                }
+              }
+            ]
+          },
+          {
+            "partId": "0.1",
+            "mimeType": "image/png",
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "image/png"
+              },
+              {
+                "name": "Content-ID",
+                "value": "<logo>"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "inline"
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "base64"
+              }
+            ],
+            "body": {
+              "attachmentId": "ANGjdJ_inline_logo",
+              "size": 18422
+            }
+          }
+        ]
+      },
+      {
+        "partId": "1",
+        "mimeType": "application/pdf",
+        "filename": "invoice-10442.pdf",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/pdf; name=\"invoice-10442.pdf\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"invoice-10442.pdf\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ_invoice_pdf",
+          "size": 224408
+        }
+      },
+      {
+        "partId": "2",
+        "mimeType": "text/csv",
+        "filename": "lines.csv",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/csv; name=\"lines.csv\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"lines.csv\""
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ_lines_csv",
+          "size": 512
+        }
+      }
+    ]
+  }
+}

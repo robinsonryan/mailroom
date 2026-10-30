@@ -1,0 +1,47 @@
+{
+  "id": "19a2f0c1d2e3f407",
+  "threadId": "19a2f0c1d2e3f300",
+  "labelIds": [
+    "INBOX",
+    "SENT"
+  ],
+  "snippet": "Please see the note below.",
+  "sizeEstimate": 912,
+  "historyId": "8842240",
+  "internalDate": "1793038442000",
+  "payload": {
+    "partId": "",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Zoë Vendor <zoe@vendor.example>"
+      },
+      {
+        "name": "To",
+        "value": "info@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Re: Quote"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<quote-77@vendor.example>"
+      },
+      {
+        "name": "References",
+        "value": "<quote-75@vendor.example> <quote-76@vendor.example>"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      }
+    ],
+    "body": {
+      "size": 25,
+      "data": "UGxlYXNlIHNlZSB0aGUgbm90ZSDigJQgWm_Dqw"
+    }
+  }
+}

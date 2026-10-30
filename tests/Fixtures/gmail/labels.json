@@ -1,0 +1,71 @@
+{
+  "labels": [
+    {
+      "id": "INBOX",
+      "name": "INBOX",
+      "type": "system"
+    },
+    {
+      "id": "SENT",
+      "name": "SENT",
+      "type": "system"
+    },
+    {
+      "id": "UNREAD",
+      "name": "UNREAD",
+      "type": "system"
+    },
+    {
+      "id": "SPAM",
+      "name": "SPAM",
+      "type": "system",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide"
+    },
+    {
+      "id": "TRASH",
+      "name": "TRASH",
+      "type": "system",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide"
+    },
+    {
+      "id": "DRAFT",
+      "name": "DRAFT",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_UPDATES",
+      "name": "CATEGORY_UPDATES",
+      "type": "system",
+      "labelListVisibility": "labelHide"
+    },
+    {
+      "id": "CATEGORY_PROMOTIONS",
+      "name": "CATEGORY_PROMOTIONS",
+      "type": "system",
+      "labelListVisibility": "labelHide"
+    },
+    {
+      "id": "Label_12",
+      "name": "Invoices/Invoice",
+      "type": "user",
+      "messageListVisibility": "show",
+      "labelListVisibility": "labelShow"
+    },
+    {
+      "id": "Label_13",
+      "name": "Invoices/Needs you",
+      "type": "user",
+      "messageListVisibility": "show",
+      "labelListVisibility": "labelShow"
+    },
+    {
+      "id": "Label_14",
+      "name": "Invoices/Filed",
+      "type": "user",
+      "messageListVisibility": "show",
+      "labelListVisibility": "labelShow"
+    }
+  ]
+}

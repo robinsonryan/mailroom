@@ -1,0 +1,39 @@
+{
+  "id": "19a2f0c1d2e3f406",
+  "threadId": "19a2f0c1d2e3f406",
+  "labelIds": [
+    "INBOX",
+    "CATEGORY_PROMOTIONS"
+  ],
+  "snippet": "Statement ready Balance: $0.00",
+  "sizeEstimate": 4210,
+  "historyId": "8842230",
+  "internalDate": "1793034842000",
+  "payload": {
+    "partId": "",
+    "mimeType": "text/html",
+    "filename": "",
+    "headers": [
+      {
+        "name": "from",
+        "value": "Statements <noreply@bank.example>"
+      },
+      {
+        "name": "to",
+        "value": "info@example.com"
+      },
+      {
+        "name": "subject",
+        "value": "Your statement is ready"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/html; charset=UTF-8"
+      }
+    ],
+    "body": {
+      "size": 220,
+      "data": "PGh0bWw-PGhlYWQ-PHN0eWxlPmJvZHkgeyBmb250LWZhbWlseTogQXJpYWw7IH08L3N0eWxlPjxzY3JpcHQ-dHJhY2soIm9wZW4iKTs8L3NjcmlwdD48L2hlYWQ-PGJvZHk-PHRhYmxlPjx0cj48dGQ-U3RhdGVtZW50Jm5ic3A7cmVhZHk8L3RkPjx0ZD5CYWxhbmNlJiM1ODsgJDAuMDA8L3RkPjwvdHI-PC90YWJsZT48ZGl2PkZpc2ggJmFtcDsgQ2hpcHM8L2Rpdj48L2JvZHk-PC9odG1sPg"
+    }
+  }
+}
