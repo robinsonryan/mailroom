@@ -24,6 +24,8 @@ use RobinsonRyan\Mailroom\Typing\Typist;
  */
 final readonly class LabelChanges
 {
+    private const ECHO_WINDOW_MINUTES = 60;
+
     public function __construct(
         private TypeSetRegistry $typeSets,
         private Corrections $corrections,
@@ -62,7 +64,11 @@ final readonly class LabelChanges
         }
     }
 
-    /** Consumes the oldest matching write: each write echoes once. */
+    /**
+     * Consumes the oldest matching write: each write echoes once. An echo is
+     * back within a tick or two, so an older write is one whose echo is never
+     * coming (a killed tick left it), and must not swallow a person's change.
+     */
     private function isEcho(Message $message, string $label, ChangeKind $kind): bool
     {
         $write = LabelWrite::query()
@@ -70,6 +76,7 @@ final readonly class LabelChanges
             ->where('label', $label)
             ->where('action', $kind === ChangeKind::LabelAdded ? LabelAction::Add : LabelAction::Remove)
             ->whereNull('echoed_at')
+            ->where('created_at', '>=', CarbonImmutable::now()->subMinutes(self::ECHO_WINDOW_MINUTES))
             ->oldest()
             ->first();
 

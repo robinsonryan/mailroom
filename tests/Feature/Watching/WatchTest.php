@@ -10,6 +10,7 @@ use RobinsonRyan\Mailroom\Data\HistoryChange;
 use RobinsonRyan\Mailroom\Data\HistoryPage;
 use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Enums\DecidedBy;
+use RobinsonRyan\Mailroom\Enums\LabelAction;
 use RobinsonRyan\Mailroom\Enums\MailboxStatus;
 use RobinsonRyan\Mailroom\Events\GatewayStuck;
 use RobinsonRyan\Mailroom\Events\MailboxLostAccess;
@@ -714,5 +715,37 @@ describe('label changes', function (): void {
 
         expect(Message::query()->sole()->currentTyping('invoices')?->type)->toBe('invoice')
             ->and(Message::query()->sole()->currentTyping('invoices')?->decided_by)->toBe(DecidedBy::Person);
+    });
+
+    it('does not take a person\'s label for the echo of a write over an hour old', function (): void {
+        watching();
+        $id = $this->fake->deliver(INFO);
+        tick();
+        tick();
+        // Left by a tick killed between the ledger row and the provider call.
+        LabelWrite::query()->create(['message_id' => Message::query()->sole()->id, 'label' => 'Invoices/Bill ready', 'action' => LabelAction::Add]);
+
+        $this->travel(61)->minutes();
+        $this->fake->personLabels(INFO, $id, add: ['Invoices/Bill ready']);
+        tick();
+
+        $current = Message::query()->sole()->currentTyping('invoices');
+        expect($current?->type)->toBe('bill_ready')
+            ->and($current?->decided_by)->toBe(DecidedBy::Person);
+    });
+
+    it('still reads a label as the echo of a write under an hour old', function (): void {
+        watching();
+        $id = $this->fake->deliver(INFO);
+        tick();
+        tick();
+        LabelWrite::query()->create(['message_id' => Message::query()->sole()->id, 'label' => 'Invoices/Bill ready', 'action' => LabelAction::Add]);
+
+        $this->travel(59)->minutes();
+        $this->fake->personLabels(INFO, $id, add: ['Invoices/Bill ready']);
+        tick();
+
+        expect(Message::query()->sole()->currentTyping('invoices')?->type)->toBe('invoice')
+            ->and(LabelWrite::query()->whereNull('echoed_at')->count())->toBe(0);
     });
 });
