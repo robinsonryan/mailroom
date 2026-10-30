@@ -29,6 +29,9 @@ final readonly class GmailProvider implements MailProvider
 
     private const IGNORED_LABELS = ['DRAFT', 'SPAM', 'TRASH'];
 
+    /** Leaving one of these is the only arrival Gmail reports for a message skipped in it. */
+    private const RESCUE_LABELS = ['SPAM', 'TRASH'];
+
     public function __construct(
         private GmailClient $client,
         private GmailLabels $labels,
@@ -162,7 +165,9 @@ final readonly class GmailProvider implements MailProvider
 
     /**
      * Gmail lists a record's own label ids per entry, and the message's current
-     * labels alongside; DRAFT, SPAM and TRASH are read from the latter.
+     * labels alongside; DRAFT, SPAM and TRASH are read from the latter. A message
+     * rescued from Spam or Trash arrives here: it was skipped when it landed, and
+     * the watcher passes over one it has already typed.
      *
      * @param  array<int|string, mixed>  $records
      * @return list<HistoryChange>
@@ -175,7 +180,13 @@ final readonly class GmailProvider implements MailProvider
         foreach ($records as $record) {
             foreach ($record['messagesAdded'] ?? [] as $entry) {
                 if (! $this->ignored($entry)) {
-                    $changes[] = new HistoryChange(ChangeKind::MessageAdded, (string) $entry['message']['id'], (string) $entry['message']['threadId']);
+                    $changes[] = $this->arrival($entry);
+                }
+            }
+
+            foreach ($record['labelsRemoved'] ?? [] as $entry) {
+                if (array_intersect($entry['labelIds'], self::RESCUE_LABELS) !== [] && ! $this->ignored($entry)) {
+                    $changes[] = $this->arrival($entry);
                 }
             }
 
@@ -187,6 +198,12 @@ final readonly class GmailProvider implements MailProvider
         }
 
         return $changes;
+    }
+
+    /** @param  array<string, mixed>  $entry  a history entry holding a message */
+    private function arrival(array $entry): HistoryChange
+    {
+        return new HistoryChange(ChangeKind::MessageAdded, (string) $entry['message']['id'], (string) $entry['message']['threadId']);
     }
 
     /**

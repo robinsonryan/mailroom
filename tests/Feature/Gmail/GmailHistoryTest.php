@@ -8,6 +8,19 @@ use RobinsonRyan\Mailroom\Enums\ChangeKind;
 use RobinsonRyan\Mailroom\Exceptions\CursorExpired;
 use RobinsonRyan\Mailroom\Tests\Feature\Gmail\GmailApi;
 
+/**
+ * A history page in which one message lost a label.
+ *
+ * @param  list<string>  $current  the labels it still carries
+ * @return array<string, mixed>
+ */
+function removedLabel(string $label, array $current): array
+{
+    return ['historyId' => '2', 'history' => [['id' => '1', 'labelsRemoved' => [
+        ['message' => ['id' => 'm1', 'threadId' => 't1', 'labelIds' => $current], 'labelIds' => [$label]],
+    ]]]];
+}
+
 beforeEach(function (): void {
     $this->provider = GmailApi::provider();
     $this->mailbox = GmailApi::mailbox();
@@ -55,6 +68,42 @@ it('skips messages carrying DRAFT, SPAM or TRASH', function (): void {
 
     expect($ids)->not->toContain('ccc3')->not->toContain('ddd4')->not->toContain('eee5');
 });
+
+it('surfaces a message rescued from Spam as an arrival, on the poll that sees the rescue', function (): void {
+    GmailApi::fake([
+        'history*' => Http::sequence()
+            ->push(['history' => [['id' => '1', 'messagesAdded' => [['message' => ['id' => 'ddd4', 'threadId' => 'tddd', 'labelIds' => ['UNREAD', 'SPAM']]]]]], 'historyId' => '2'])
+            ->push(GmailApi::fixture('history-rescued-from-spam')),
+    ]);
+
+    $skipped = $this->provider->history($this->mailbox, '1');
+    $rescued = $this->provider->history($this->mailbox, '2');
+
+    expect($skipped->changes)->toBe([])
+        ->and(array_map(fn (HistoryChange $c): array => [$c->kind, $c->providerMessageId, $c->threadId, $c->labels], $rescued->changes))->toBe([
+            [ChangeKind::MessageAdded, 'ddd4', 'tddd', []],
+            [ChangeKind::LabelAdded, 'ddd4', 'tddd', ['INBOX']],
+            [ChangeKind::LabelRemoved, 'ddd4', 'tddd', ['SPAM']],
+        ]);
+});
+
+it('surfaces a message restored from Trash as an arrival', function (): void {
+    GmailApi::fake(['history*' => Http::response(removedLabel('TRASH', ['INBOX']))]);
+
+    $change = $this->provider->history($this->mailbox, '1')->changes[0];
+
+    expect($change->kind)->toBe(ChangeKind::MessageAdded)
+        ->and($change->providerMessageId)->toBe('m1');
+});
+
+it('does not surface a message that left one hidden state for another', function (string $removed, array $current): void {
+    GmailApi::fake(['history*' => Http::response(removedLabel($removed, $current))]);
+
+    expect($this->provider->history($this->mailbox, '1')->changes)->toBe([]);
+})->with([
+    'moved from Spam to Trash' => ['SPAM', ['TRASH']],
+    'restored from Trash but still a draft' => ['TRASH', ['DRAFT']],
+]);
 
 it('returns the new cursor when nothing changed', function (): void {
     GmailApi::fake(['history*' => Http::response(GmailApi::fixture('history-empty'))]);

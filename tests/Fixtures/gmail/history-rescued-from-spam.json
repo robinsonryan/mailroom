@@ -1,0 +1,44 @@
+{
+  "history": [
+    {
+      "id": "8842501",
+      "messages": [
+        {
+          "id": "ddd4",
+          "threadId": "tddd"
+        }
+      ],
+      "labelsAdded": [
+        {
+          "message": {
+            "id": "ddd4",
+            "threadId": "tddd",
+            "labelIds": [
+              "UNREAD",
+              "INBOX"
+            ]
+          },
+          "labelIds": [
+            "INBOX"
+          ]
+        }
+      ],
+      "labelsRemoved": [
+        {
+          "message": {
+            "id": "ddd4",
+            "threadId": "tddd",
+            "labelIds": [
+              "UNREAD",
+              "INBOX"
+            ]
+          },
+          "labelIds": [
+            "SPAM"
+          ]
+        }
+      ]
+    }
+  ],
+  "historyId": "8842502"
+}
