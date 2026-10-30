@@ -45,6 +45,19 @@ it('is not fooled by a subject that spells out a CreationDate', function (): voi
         ->toContain("\n/CreationDate (D:20260304050607+00'00')");
 });
 
+it('is not fooled by a subject that spells out the end of the object', function (string $title): void {
+    $stamped = PdfCreationDate::stamp(ChromeShapedPdf::bytes(title: $title), CarbonImmutable::parse('2026-03-04T05:06:07+00:00'));
+
+    expect($stamped)->toContain("/Title {$title}")
+        ->toContain("\n/CreationDate (D:20260304050607+00'00')");
+})->with([
+    'in the middle' => ['(Invoice endobj)'],
+    'on a line of its own' => ["(Invoice\nendobj\n)"],
+    'after an escaped paren' => ['(Invoice \\) endobj)'],
+    'inside balanced parens' => ['(Invoice (endobj) 7)'],
+    'after an escaped backslash' => ['(Invoice \\\\) /Producer (endobj)'],
+]);
+
 it('leaves a CreationDate-shaped string outside the Info object alone', function (): void {
     $pdf = ChromeShapedPdf::bytes();
     $decoy = "/CreationDate (D:20000101000000+00'00')";
@@ -59,6 +72,7 @@ it('refuses, rather than ship the wrong date, when it cannot rewrite in place', 
     'not a pdf' => ['', 'no Info dictionary'],
     'no trailer Info' => [str_replace('/Info 1 0 R', '', ChromeShapedPdf::bytes()), 'no Info dictionary'],
     'Info object missing' => [str_replace('1 0 obj', '9 0 obj', ChromeShapedPdf::bytes()), 'could not be found'],
+    'a string that never closes' => [ChromeShapedPdf::bytes(title: '(Invoice 7'), 'could not be found'],
     'no CreationDate' => [str_replace('/CreationDate', '/CreatedOn', ChromeShapedPdf::bytes()), 'no CreationDate'],
     'a date of another length' => [ChromeShapedPdf::bytes(date: 'D:20261030154503Z'), 'same length'],
 ]);

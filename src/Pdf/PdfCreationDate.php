@@ -67,12 +67,38 @@ final class PdfCreationDate
         }
 
         $start = strrpos(substr($pdf, 0, $trailer), "\n{$info[1]} {$info[2]} obj");
-        $end = $start === false ? false : strpos($pdf, 'endobj', $start);
+        $end = $start === false ? false : self::endOfObject($pdf, $start);
 
         if ($start === false || $end === false) {
             throw new RenderFailed('The rendered PDF\'s Info object could not be found.');
         }
 
         return [$start, $end];
+    }
+
+    /**
+     * Where the object's own endobj is. A string can spell that word, as a
+     * subject can, so strings are skipped: parens nest and a backslash escapes
+     * the next byte.
+     */
+    private static function endOfObject(string $pdf, int $start): int|false
+    {
+        $depth = 0;
+
+        for ($at = $start, $length = strlen($pdf); $at < $length; $at++) {
+            $byte = $pdf[$at];
+
+            if ($depth > 0 && $byte === '\\') {
+                $at++;
+            } elseif ($byte === '(') {
+                $depth++;
+            } elseif ($byte === ')' && $depth > 0) {
+                $depth--;
+            } elseif ($depth === 0 && substr_compare($pdf, 'endobj', $at, 6) === 0) {
+                return $at;
+            }
+        }
+
+        return false;
     }
 }
