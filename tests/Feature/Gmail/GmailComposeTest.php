@@ -46,7 +46,7 @@ it('sends a plain UTF-8 message', function (): void {
         ->and($headers['cc'])->toBe('c@vendor.example')
         ->and($headers['subject'])->toBe('Receipt')
         ->and($headers['mime-version'])->toBe('1.0')
-        ->and($headers['content-type'])->toBe('text/plain; charset=UTF-8')
+        ->and(strtolower($headers['content-type']))->toBe('text/plain; charset=utf-8')
         ->and($headers['content-transfer-encoding'])->toBe('quoted-printable')
         ->and(quoted_printable_decode($body))->toBe("Thanks — Zoë\r\nLine two");
 });
@@ -72,23 +72,69 @@ it('encodes a non-ASCII subject as encoded words', function (): void {
     $raw = GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']);
     [$headers] = GmailApi::split($raw);
 
-    expect($raw)->toContain('=?UTF-8?B?')
+    expect(strtolower($raw))->toContain('=?utf-8?')
         ->and(mb_check_encoding($headers['subject'], 'ASCII'))->toBeTrue()
         ->and(iconv_mime_decode($headers['subject'], 0, 'UTF-8'))->toBe($subject);
 });
 
-it('cannot have headers injected through a subject or an address', function (): void {
+it('encodes a non-ASCII display name in an address', function (): void {
     GmailApi::fake(['messages/send' => Http::response($this->sent)]);
 
-    $this->provider->send($this->mailbox, new OutgoingMessage(
-        to: ["a@vendor.example\r\nBcc: evil@attacker.example"],
-        subject: "Hello\r\nBcc: evil@attacker.example",
-        text: 'Body',
-    ));
+    $this->provider->send($this->mailbox, new OutgoingMessage(['Zoë Bee <z@vendor.example>'], 'Hi', 'Body', cc: ['Jürgen <j@vendor.example>']));
+
+    [$headers] = GmailApi::split(GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']));
+
+    expect(mb_check_encoding($headers['to'], 'ASCII'))->toBeTrue()
+        ->and(mb_check_encoding($headers['cc'], 'ASCII'))->toBeTrue()
+        ->and(iconv_mime_decode($headers['to'], 0, 'UTF-8'))->toBe('Zoë Bee <z@vendor.example>')
+        ->and(iconv_mime_decode($headers['cc'], 0, 'UTF-8'))->toBe('Jürgen <j@vendor.example>');
+});
+
+it('threads a reply onto a Message-ID that is not strictly RFC-shaped, on one line', function (): void {
+    $original = ['id' => 'o1', 'threadId' => 't1', 'payload' => ['headers' => [
+        ['name' => 'Message-ID', 'value' => '<not an addr-spec>'],
+        ['name' => 'References', 'value' => "<a@vendor.example>\r\n <b@vendor.example>"],
+    ]]];
+    GmailApi::fake(['messages/o1?*' => Http::response($original), 'messages/send' => Http::response($this->sent)]);
+
+    $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Re', 'Body', inReplyTo: 'o1'));
+
+    [$headers] = GmailApi::split(GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']));
+
+    expect($headers['in-reply-to'])->toBe('<not an addr-spec>')
+        ->and($headers['references'])->toBe('<a@vendor.example> <b@vendor.example> <not an addr-spec>');
+});
+
+it('leaves out threading headers the original gives nothing for', function (): void {
+    GmailApi::fake([
+        'messages/o1?*' => Http::response(['id' => 'o1', 'threadId' => 't1', 'payload' => ['headers' => []]]),
+        'messages/send' => Http::response($this->sent),
+    ]);
+
+    $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Re', 'Body', inReplyTo: 'o1'));
+
+    [$headers] = GmailApi::split(GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']));
+
+    expect($headers)->not->toHaveKey('in-reply-to')->not->toHaveKey('references');
+});
+
+it('cannot have a header injected through a subject', function (): void {
+    GmailApi::fake(['messages/send' => Http::response($this->sent)]);
+
+    $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], "Hello\r\nBcc: evil@attacker.example", 'Body'));
 
     [$headers] = GmailApi::split(GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']));
 
     expect($headers)->not->toHaveKey('bcc');
+});
+
+it('refuses an address carrying a header, and sends nothing', function (): void {
+    GmailApi::fake(['messages/send' => Http::response($this->sent)]);
+
+    expect(fn () => $this->provider->send($this->mailbox, new OutgoingMessage(["a@vendor.example\r\nBcc: evil@attacker.example"], 'Hi', 'Body')))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect(GmailApi::requests(GmailApi::BASE.'messages/send'))->toBeEmpty();
 });
 
 it('sends multipart/alternative when html is present', function (): void {
@@ -97,7 +143,7 @@ it('sends multipart/alternative when html is present', function (): void {
     $this->provider->send($this->mailbox, new OutgoingMessage(['a@vendor.example'], 'Both', 'Plain — text', '<p>Html — body</p>'));
 
     [$headers, $body] = GmailApi::split(GmailApi::decodeRaw(GmailApi::requests(GmailApi::BASE.'messages/send')[0]['raw']));
-    preg_match('/^multipart\/alternative; boundary="([^"]+)"$/', $headers['content-type'], $match);
+    preg_match('/^multipart\/alternative; boundary="?([^";]+)"?$/', $headers['content-type'], $match);
     $boundary = $match[1];
     $parts = explode("--{$boundary}", $body);
 
@@ -107,9 +153,9 @@ it('sends multipart/alternative when html is present', function (): void {
     [$plainHeaders, $plain] = GmailApi::split(ltrim($parts[1]));
     [$htmlHeaders, $html] = GmailApi::split(ltrim($parts[2]));
 
-    expect($plainHeaders['content-type'])->toBe('text/plain; charset=UTF-8')
+    expect(strtolower($plainHeaders['content-type']))->toBe('text/plain; charset=utf-8')
         ->and(quoted_printable_decode(rtrim($plain)))->toBe('Plain — text')
-        ->and($htmlHeaders['content-type'])->toBe('text/html; charset=UTF-8')
+        ->and(strtolower($htmlHeaders['content-type']))->toBe('text/html; charset=utf-8')
         ->and($htmlHeaders['content-transfer-encoding'])->toBe('quoted-printable')
         ->and(quoted_printable_decode(rtrim($html)))->toBe('<p>Html — body</p>');
 });

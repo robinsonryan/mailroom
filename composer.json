@@ -10,6 +10,7 @@
     ],
     "require": {
         "php": "^8.2",
+        "egulias/email-validator": "^3.2|^4.0",
         "guzzlehttp/guzzle": "^7.8|^8.0",
         "illuminate/cache": "^11.0|^12.0|^13.0",
         "illuminate/console": "^11.0|^12.0|^13.0",
@@ -19,7 +20,8 @@
         "illuminate/http": "^11.0|^12.0|^13.0",
         "illuminate/queue": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
-        "spatie/browsershot": "^5.4"
+        "spatie/browsershot": "^5.4",
+        "symfony/mime": "^7.0|^8.0"
     },
     "require-dev": {
         "larastan/larastan": "^3.0",
