@@ -117,14 +117,11 @@ final readonly class GmailProvider implements MailProvider
     {
         $body = (new GmailMessage($this->resource($mailbox, $providerMessageId, 'full')))->partBody($partId);
 
-        if (! isset($body['attachmentId'])) {
+        if (! isset($body['data']) && ! isset($body['attachmentId'])) {
             throw new MessageNotFound("No part {$partId} in message {$providerMessageId}.");
         }
 
-        $path = "{$this->messagePath($providerMessageId)}/attachments/".rawurlencode((string) $body['attachmentId']);
-        $response = $this->client->request($mailbox, 'GET', $path);
-
-        return GmailMessage::decode((string) $this->messageJson($response, $mailbox, $providerMessageId)['data']);
+        return GmailMessage::decode((string) ($body['data'] ?? $this->storedData($mailbox, $providerMessageId, (string) $body['attachmentId'])));
     }
 
     public function changeLabels(Mailbox $mailbox, string $providerMessageId, array $add, array $remove): void
@@ -257,7 +254,22 @@ final readonly class GmailProvider implements MailProvider
 
     private function message(Mailbox $mailbox, string $id, string $format): GmailMessage
     {
-        return new GmailMessage($this->resource($mailbox, $id, $format));
+        $message = new GmailMessage($this->resource($mailbox, $id, $format));
+        $stored = [];
+
+        foreach ($message->storedBodies() as $attachmentId) {
+            $stored[$attachmentId] = $this->storedData($mailbox, $id, $attachmentId);
+        }
+
+        return $stored === [] ? $message : $message->withBodies($stored);
+    }
+
+    /** The base64url content Gmail keeps apart from the message. */
+    private function storedData(Mailbox $mailbox, string $id, string $attachmentId): string
+    {
+        $path = "{$this->messagePath($id)}/attachments/".rawurlencode($attachmentId);
+
+        return (string) $this->messageJson($this->client->request($mailbox, 'GET', $path), $mailbox, $id)['data'];
     }
 
     /** @return array<string, mixed> */

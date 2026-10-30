@@ -9,15 +9,18 @@ use RobinsonRyan\Mailroom\Data\Attachment;
 
 /**
  * One users.messages resource read: the part tree walked into body text and
- * attachment metadata. Only ever holds what messages.get returned, which for
- * attachments is an id, never the bytes.
+ * attachment metadata. Gmail may hand any part's content inline as body.data or
+ * apart from the message behind body.attachmentId, so what a part is for is read
+ * from its name and type, never from where its content sits.
  */
 final readonly class GmailMessage
 {
     /** At this size an image is a document someone attached, not a logo. */
     private const EMBEDDED_IMAGE_LIMIT = 100_000;
 
-    /** @var list<array<string, mixed>> text parts with their data inline */
+    private const BODY_TYPES = ['text/plain', 'text/html'];
+
+    /** @var list<array<string, mixed>> text parts, their content inline or stored apart */
     private array $bodies;
 
     /** @var list<Attachment> */
@@ -25,8 +28,9 @@ final readonly class GmailMessage
 
     /**
      * @param  array<string, mixed>  $resource
+     * @param  array<string, string>  $stored  attachmentId => data, for the parts in storedBodies()
      */
-    public function __construct(private array $resource)
+    public function __construct(private array $resource, private array $stored = [])
     {
         [$this->bodies, $named] = $this->walk((array) ($resource['payload'] ?? []));
 
@@ -102,6 +106,33 @@ final readonly class GmailMessage
         return $part === null ? null : (array) ($part['body'] ?? []);
     }
 
+    /**
+     * The attachmentIds of the bodies text() and html() read that Gmail stored
+     * apart from the message; withBodies() takes their content.
+     *
+     * @return list<string>
+     */
+    public function storedBodies(): array
+    {
+        $ids = [];
+
+        foreach (self::BODY_TYPES as $mime) {
+            $part = $this->bodyPart($mime);
+
+            if ($part !== null && ! isset($part['body']['data'])) {
+                $ids[] = (string) $part['body']['attachmentId'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /** @param  array<string, string>  $stored  attachmentId => data */
+    public function withBodies(array $stored): self
+    {
+        return new self($this->resource, $stored);
+    }
+
     /** The plain part, or the html reduced to text, cut to $limit characters. */
     public function summaryText(int $limit): string
     {
@@ -109,8 +140,9 @@ final readonly class GmailMessage
     }
 
     /**
-     * A part with a filename and an attachmentId is named, and what it contains
-     * (an attached message's parts) belongs to it.
+     * A named part holding content is an attachment, and what it contains (an
+     * attached message's parts) belongs to it. Text that came inline stays
+     * readable as a body too, for mail whose only text is a named part.
      *
      * @param  array<string, mixed>  $part
      * @return array{list<array<string, mixed>>, list<array<string, mixed>>} text parts, named parts
@@ -119,13 +151,14 @@ final readonly class GmailMessage
     {
         $filename = (string) ($part['filename'] ?? '');
         $body = (array) ($part['body'] ?? []);
-        $mime = strtolower((string) ($part['mimeType'] ?? ''));
+        $isText = in_array(strtolower((string) ($part['mimeType'] ?? '')), self::BODY_TYPES, true);
+        $hasContent = isset($body['data']) || isset($body['attachmentId']);
 
-        if ($filename !== '' && isset($body['attachmentId'])) {
-            return [[], [$part]];
+        if ($filename !== '' && $hasContent) {
+            return [$isText && isset($body['data']) ? [$part] : [], [$part]];
         }
 
-        $bodies = in_array($mime, ['text/plain', 'text/html'], true) && isset($body['data']) ? [$part] : [];
+        $bodies = $isText && $hasContent ? [$part] : [];
         $named = [];
 
         foreach ((array) ($part['parts'] ?? []) as $child) {
@@ -169,14 +202,30 @@ final readonly class GmailMessage
         );
     }
 
-    /** The first part of this type, preferring inline parts over ones marked attachment. */
     private function body(string $mime): ?string
+    {
+        $part = $this->bodyPart($mime);
+
+        if ($part === null) {
+            return null;
+        }
+
+        $data = $part['body']['data'] ?? $this->stored[$part['body']['attachmentId']] ?? '';
+
+        return mb_scrub(self::decode((string) $data), 'UTF-8');
+    }
+
+    /**
+     * The first part of this type, preferring inline parts over ones marked attachment.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function bodyPart(string $mime): ?array
     {
         $parts = array_filter($this->bodies, fn (array $part): bool => strtolower((string) $part['mimeType']) === $mime);
         $inline = array_filter($parts, fn (array $part): bool => ! $this->markedAttachment($part));
-        $part = reset($inline) ?: reset($parts);
 
-        return $part === false ? null : mb_scrub(self::decode((string) $part['body']['data']), 'UTF-8');
+        return (reset($inline) ?: reset($parts)) ?: null;
     }
 
     /** @param  array<string, mixed>  $part */
