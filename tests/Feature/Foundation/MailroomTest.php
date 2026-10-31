@@ -24,7 +24,7 @@ beforeEach(function (): void {
         threshold: 0.8,
     ));
     $this->mailroom = app(Mailroom::class);
-    $this->mailbox = $this->mailroom->connect('Info@Example.com', 'afwd-info');
+    $this->mailbox = $this->mailroom->connect('Info@Example.com', 'shop-info');
 });
 
 it('connects a mailbox with a database-generated-style uuid v7 key and a lowercased address', function (): void {

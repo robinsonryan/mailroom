@@ -27,7 +27,7 @@ beforeEach(function (): void {
     $this->fake = FakeProvider::install();
     $this->gateway = FakeGateway::install();
     $this->mailroom = app(Mailroom::class);
-    $this->mailbox = $this->mailroom->connect('info@example.com', 'afwd-info');
+    $this->mailbox = $this->mailroom->connect('info@example.com', 'shop-info');
     $this->typist = app(Typist::class);
 });
 

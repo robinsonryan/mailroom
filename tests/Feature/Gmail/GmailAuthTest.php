@@ -63,13 +63,13 @@ it('never holds the access token in the cache store in the clear', function (): 
 
     $this->provider->currentCursor($this->mailbox);
 
-    $cached = app(Repository::class)->getStore()->get('mailroom:gmail:token:afwd-info');
+    $cached = app(Repository::class)->getStore()->get('mailroom:gmail:token:shop-info');
     expect($cached)->toBeString()->not->toContain('ya29');
 });
 
 it('treats an unreadable cached token as a cache miss', function (): void {
     GmailApi::fake(['profile' => Http::response(GmailApi::fixture('profile'))]);
-    app(Repository::class)->put('mailroom:gmail:token:afwd-info', 'encrypted-with-a-rotated-key', 600);
+    app(Repository::class)->put('mailroom:gmail:token:shop-info', 'encrypted-with-a-rotated-key', 600);
 
     $this->provider->currentCursor($this->mailbox);
 

@@ -29,7 +29,7 @@ it('gives consumers a working asPdf on the stub driver', function (): void {
     config()->set('mailroom.pdf.driver', 'stub');
     $fake = FakeProvider::install();
     $mailroom = app(Mailroom::class);
-    $mailbox = $mailroom->connect('info@example.com', 'afwd-info');
+    $mailbox = $mailroom->connect('info@example.com', 'shop-info');
     $id = $fake->deliver(
         'info@example.com',
         subject: 'Invoice & receipt',

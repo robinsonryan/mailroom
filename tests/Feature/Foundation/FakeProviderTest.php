@@ -10,7 +10,7 @@ use RobinsonRyan\Mailroom\Testing\FakeProvider;
 
 beforeEach(function (): void {
     $this->fake = FakeProvider::install();
-    $this->mailbox = app(Mailroom::class)->connect('info@example.com', 'afwd-info');
+    $this->mailbox = app(Mailroom::class)->connect('info@example.com', 'shop-info');
 });
 
 it('reports new messages and label changes after a cursor, as Gmail history does', function (): void {

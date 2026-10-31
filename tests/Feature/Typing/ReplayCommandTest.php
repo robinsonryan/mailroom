@@ -15,7 +15,7 @@ beforeEach(function (): void {
     $this->fake = FakeProvider::install();
     $this->gateway = FakeGateway::install();
     $this->set = InvoiceSet::register();
-    app(Mailroom::class)->connect('info@example.com', 'afwd-info');
+    app(Mailroom::class)->connect('info@example.com', 'shop-info');
     $this->file = tempnam(sys_get_temp_dir(), 'replay');
 });
 

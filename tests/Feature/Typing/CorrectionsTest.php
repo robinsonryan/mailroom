@@ -25,7 +25,7 @@ beforeEach(function (): void {
     $this->gateway = FakeGateway::install();
     InvoiceSet::register();
     $this->mailroom = app(Mailroom::class);
-    $this->mailbox = $this->mailroom->connect('info@example.com', 'afwd-info');
+    $this->mailbox = $this->mailroom->connect('info@example.com', 'shop-info');
     $this->id = $this->fake->deliver('info@example.com');
     $this->ref = $this->fake->ref($this->mailbox, $this->id);
 });

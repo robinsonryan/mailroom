@@ -20,9 +20,9 @@ afterEach(function (): void {
 });
 
 it('reads the identity file in the configured directory', function (): void {
-    file_put_contents($this->directory.'/afwd-info.json', $this->valid);
+    file_put_contents($this->directory.'/shop-info.json', $this->valid);
 
-    $credentials = $this->resolver->resolve('afwd-info');
+    $credentials = $this->resolver->resolve('shop-info');
 
     expect($credentials->clientId)->toBe('client')
         ->and($credentials->clientSecret)->toBe('secret')
@@ -30,17 +30,17 @@ it('reads the identity file in the configured directory', function (): void {
 });
 
 it('reports a missing file as missing credentials', function (): void {
-    $this->resolver->resolve('afwd-info');
+    $this->resolver->resolve('shop-info');
 })->throws(MissingCredentials::class);
 
 it('reports a malformed file as missing credentials, without echoing it', function (string $contents): void {
-    file_put_contents($this->directory.'/afwd-info.json', $contents);
+    file_put_contents($this->directory.'/shop-info.json', $contents);
 
     try {
-        $this->resolver->resolve('afwd-info');
+        $this->resolver->resolve('shop-info');
         $this->fail('Expected MissingCredentials.');
     } catch (MissingCredentials $e) {
-        expect($e->getMessage())->toContain('afwd-info')->not->toContain('hunter2');
+        expect($e->getMessage())->toContain('shop-info')->not->toContain('hunter2');
     }
 })->with([
     'not json' => 'hunter2 {',
@@ -61,7 +61,7 @@ it('rejects an identity with a path separator or a dot, even when that file exis
     'a slash' => ['nested/box', 'nested/box.json'],
     'a parent traversal' => ['nested/../box', 'box.json'],
     'a backslash' => ['nested\\box', 'nested\\box.json'],
-    'a dot' => ['afwd.info', 'afwd.info.json'],
+    'a dot' => ['shop.info', 'shop.info.json'],
 ])->throws(MissingCredentials::class);
 
 it('is the bound credential resolver', function (): void {

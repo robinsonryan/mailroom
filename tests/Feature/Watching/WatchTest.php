@@ -38,7 +38,7 @@ beforeEach(function (): void {
     $this->gateway = FakeGateway::install();
     InvoiceSet::register();
     $this->mailroom = app(Mailroom::class);
-    $this->mailbox = $this->mailroom->connect(INFO, 'afwd-info');
+    $this->mailbox = $this->mailroom->connect(INFO, 'shop-info');
 });
 
 function tick(string ...$options): void
@@ -444,7 +444,7 @@ describe('disconnection', function (): void {
         $this->mailbox->refresh();
         expect($this->mailbox->isWatched())->toBeFalse();
 
-        $this->mailroom->connect(INFO, 'afwd-info');
+        $this->mailroom->connect(INFO, 'shop-info');
         $id = $fresh->deliver(INFO);
         tick();
 

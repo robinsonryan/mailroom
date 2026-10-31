@@ -21,7 +21,7 @@ final readonly class FakeWorld implements MailWorld
     public function __construct()
     {
         $this->fake = FakeProvider::install();
-        $this->mailbox = app(Mailroom::class)->connect(self::ADDRESS, 'afwd-info');
+        $this->mailbox = app(Mailroom::class)->connect(self::ADDRESS, 'shop-info');
     }
 
     public function provider(): MailProvider

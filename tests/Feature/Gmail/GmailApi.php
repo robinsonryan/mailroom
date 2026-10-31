@@ -83,7 +83,7 @@ final class GmailApi
         return app(ProviderRegistry::class)->get('gmail');
     }
 
-    public static function mailbox(string $address = 'info@example.com', string $identity = 'afwd-info'): Mailbox
+    public static function mailbox(string $address = 'info@example.com', string $identity = 'shop-info'): Mailbox
     {
         return app(Mailroom::class)->connect($address, $identity);
     }

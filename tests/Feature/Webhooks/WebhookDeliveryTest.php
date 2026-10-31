@@ -78,7 +78,7 @@ it('queues a delivery when the watcher types a message', function (): void {
     FakeGateway::install();
     InvoiceSet::register();
     subscription();
-    $mailbox = app(Mailroom::class)->connect('info@example.com', 'afwd-info');
+    $mailbox = app(Mailroom::class)->connect('info@example.com', 'shop-info');
 
     app(Typist::class)->type($mailbox, $fake->deliver('info@example.com'));
 

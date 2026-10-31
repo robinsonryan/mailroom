@@ -18,7 +18,7 @@ beforeEach(function (): void {
     FakeGateway::install();
     InvoiceSet::register();
     $this->mailroom = app(Mailroom::class);
-    $this->mailbox = $this->mailroom->connect('info@example.com', 'afwd-info');
+    $this->mailbox = $this->mailroom->connect('info@example.com', 'shop-info');
     $this->id = $this->fake->deliver('info@example.com');
     app(Typist::class)->type($this->mailbox, $this->id);
     $this->typing = Typing::query()->sole();
