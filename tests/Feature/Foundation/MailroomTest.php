@@ -77,3 +77,10 @@ it('forgets a label write when the provider call fails', function (): void {
     expect(fn () => $this->mailroom->label($ref, 'Invoices/Filed'))->toThrow(MailboxDisconnected::class)
         ->and(LabelWrite::query()->count())->toBe(0);
 });
+
+it('takes a model key from the database, ready straight after create', function (): void {
+    $mailbox = $this->mailroom->connect('keys@example.com', 'shop-info');
+
+    expect($mailbox->id)->toBeString()->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/')
+        ->and($mailbox->fresh()?->id)->toBe($mailbox->id);
+});

@@ -7,6 +7,11 @@ Behavior changes land here in the commit that makes them, not at tag time.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-31
+
+### Changed
+- Primary keys come from the columns' `uuidv7()` default; the models no longer mint them.
+
 ### Added
 - A contract suite runs the same tests against `FakeProvider` and `GmailProvider`, the latter
   over an in-memory Gmail.
