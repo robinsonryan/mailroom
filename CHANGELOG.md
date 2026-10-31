@@ -7,6 +7,16 @@ Behavior changes land here in the commit that makes them, not at tag time.
 
 ## [Unreleased]
 
+### Added
+- A contract suite runs the same tests against `FakeProvider` and `GmailProvider`, the latter
+  over an in-memory Gmail.
+
+### Fixed
+- `FakeProvider` now behaves as the Gmail adapter does: mail in Spam, Trash or Drafts is left
+  out of history, a rescued message arrives, html summaries drop style and script contents,
+  an unknown part id is refused, inserted mail can be read and appears in history, and a
+  reply to a message it doesn't hold is refused.
+
 ## [0.3.1] - 2026-10-30
 
 ### Added

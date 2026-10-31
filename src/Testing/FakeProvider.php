@@ -19,6 +19,7 @@ use RobinsonRyan\Mailroom\Exceptions\MailboxDisconnected;
 use RobinsonRyan\Mailroom\Exceptions\MessageNotFound;
 use RobinsonRyan\Mailroom\Models\Mailbox;
 use RobinsonRyan\Mailroom\ProviderRegistry;
+use RobinsonRyan\Mailroom\Support\HtmlText;
 
 /**
  * An in-memory mail system for consumers' tests. Behaves like Gmail where it
@@ -33,6 +34,10 @@ use RobinsonRyan\Mailroom\ProviderRegistry;
  */
 final class FakeProvider implements MailProvider
 {
+    private const IGNORED_LABELS = ['DRAFT', 'SPAM', 'TRASH'];
+
+    private const RESCUE_LABELS = ['SPAM', 'TRASH'];
+
     /** @var array<string, array<string, array{thread: string, from: string, to: string, subject: string, text: ?string, html: ?string, received: CarbonImmutable, labels: list<string>, attachments: list<array{name: string, mime: string, bytes: string}>}>> */
     private array $messages = [];
 
@@ -100,7 +105,7 @@ final class FakeProvider implements MailProvider
             'labels' => array_values(array_unique(['INBOX', ...$labels])),
             'attachments' => $attachments,
         ];
-        $this->record($mailbox, new HistoryChange(ChangeKind::MessageAdded, $id, $thread));
+        $this->recordArrival($mailbox, $id);
 
         return $id;
     }
@@ -184,7 +189,7 @@ final class FakeProvider implements MailProvider
     {
         $this->guard($mailbox);
         $m = $this->find($mailbox->address, $providerMessageId);
-        $text = $m['text'] ?? strip_tags((string) $m['html']);
+        $text = $m['text'] ?? HtmlText::from((string) $m['html']);
 
         return new MessageSummary(
             $providerMessageId,
@@ -225,7 +230,9 @@ final class FakeProvider implements MailProvider
         $this->guard($mailbox);
         $m = $this->find($mailbox->address, $providerMessageId);
 
-        return $m['attachments'][(int) $partId]['bytes'] ?? throw new MessageNotFound("No part {$partId}.");
+        $part = ctype_digit($partId) ? ($m['attachments'][(int) $partId] ?? null) : null;
+
+        return $part['bytes'] ?? throw new MessageNotFound("No part {$partId}.");
     }
 
     public function changeLabels(Mailbox $mailbox, string $providerMessageId, array $add, array $remove): void
@@ -245,12 +252,31 @@ final class FakeProvider implements MailProvider
         $this->guard($mailbox);
         $this->inserted[] = ['mailbox' => $mailbox->address, 'raw' => $rawMime, 'labels' => $labels];
 
-        return 'ins'.(++$this->cursor);
+        $id = 'ins'.(++$this->cursor);
+        [$head, $body] = explode("\r\n\r\n", $rawMime, 2) + [1 => ''];
+        preg_match_all('/^([\w-]+):\s*(.*)$/m', $head, $headers);
+        $headers = array_combine(array_map(strtolower(...), $headers[1]), array_map(trim(...), $headers[2]));
+
+        $this->messages[$mailbox->address][$id] = [
+            'thread' => 't'.$id,
+            'from' => $headers['from'] ?? '',
+            'to' => $headers['to'] ?? $mailbox->address,
+            'subject' => $headers['subject'] ?? '',
+            'text' => $body,
+            'html' => null,
+            'received' => CarbonImmutable::now(),
+            'labels' => $labels,
+            'attachments' => [],
+        ];
+        $this->recordArrival($mailbox->address, $id);
+
+        return $id;
     }
 
     public function draft(Mailbox $mailbox, OutgoingMessage $message): string
     {
         $this->guard($mailbox);
+        $this->assertRepliable($mailbox, $message);
         $this->drafts[] = ['mailbox' => $mailbox->address, 'message' => $message];
 
         return 'd'.(++$this->cursor);
@@ -259,6 +285,7 @@ final class FakeProvider implements MailProvider
     public function send(Mailbox $mailbox, OutgoingMessage $message): string
     {
         $this->guard($mailbox);
+        $this->assertRepliable($mailbox, $message);
         $this->sent[] = ['mailbox' => $mailbox->address, 'message' => $message];
 
         return 's'.(++$this->cursor);
@@ -278,12 +305,37 @@ final class FakeProvider implements MailProvider
         $added = array_values(array_diff($after, $before));
         $removed = array_values(array_diff($before, $after));
 
+        if (array_intersect($after, self::IGNORED_LABELS) !== []) {
+            return;
+        }
+
+        if (array_intersect($removed, self::RESCUE_LABELS) !== []) {
+            $this->recordArrival($mailbox, $id);
+        }
+
         if ($added !== []) {
             $this->record($mailbox, new HistoryChange(ChangeKind::LabelAdded, $id, $m['thread'], $added));
         }
 
         if ($removed !== []) {
             $this->record($mailbox, new HistoryChange(ChangeKind::LabelRemoved, $id, $m['thread'], $removed));
+        }
+    }
+
+    /** As Gmail's adapter does: mail in Spam, Trash or Drafts has not arrived yet. */
+    private function recordArrival(string $mailbox, string $id): void
+    {
+        $m = $this->messages[$mailbox][$id];
+
+        if (array_intersect($m['labels'], self::IGNORED_LABELS) === []) {
+            $this->record($mailbox, new HistoryChange(ChangeKind::MessageAdded, $id, $m['thread']));
+        }
+    }
+
+    private function assertRepliable(Mailbox $mailbox, OutgoingMessage $message): void
+    {
+        if ($message->inReplyTo !== null) {
+            $this->find($mailbox->address, $message->inReplyTo);
         }
     }
 

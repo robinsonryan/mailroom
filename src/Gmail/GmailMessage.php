@@ -6,6 +6,7 @@ namespace RobinsonRyan\Mailroom\Gmail;
 
 use Carbon\CarbonImmutable;
 use RobinsonRyan\Mailroom\Data\Attachment;
+use RobinsonRyan\Mailroom\Support\HtmlText;
 
 /**
  * One users.messages resource read: the part tree walked into body text and
@@ -136,7 +137,7 @@ final readonly class GmailMessage
     /** The plain part, or the html reduced to text, cut to $limit characters. */
     public function summaryText(int $limit): string
     {
-        return mb_substr($this->text() ?? $this->stripHtml((string) $this->html()), 0, $limit);
+        return mb_substr($this->text() ?? HtmlText::from((string) $this->html()), 0, $limit);
     }
 
     /**
@@ -244,18 +245,6 @@ final readonly class GmailMessage
         }
 
         return '';
-    }
-
-    /**
-     * Style and script contents are not tags, so strip_tags alone would leave
-     * them as the "text"; a template's CSS can fill the whole typing limit.
-     */
-    private function stripHtml(string $html): string
-    {
-        $html = preg_replace('#<(style|script|head)\b[^>]*>.*?</\1\s*>#is', ' ', $html) ?? $html;
-        $text = html_entity_decode(strip_tags(str_replace('<', ' <', $html)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
     /**
